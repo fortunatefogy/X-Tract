@@ -1,0 +1,23 @@
+name: linky
+description: Share a webpage to detect, download, and manage public media.
+publish_to: none
+version: 0.1.0+1
+
+environment:
+  sdk: '>=3.4.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  path_provider: ^2.1.5
+  video_player: ^2.9.5
+  flutter_inappwebview: ^6.1.5
+  background_downloader: ^9.5.9
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true
