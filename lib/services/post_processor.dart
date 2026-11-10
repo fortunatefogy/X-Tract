@@ -37,7 +37,9 @@ class PostProcessor {
     var current = file;
     String? warning;
 
-    if (settings.audioOnlyDownloads && type == 'video') {
+    if (settings.audioOnlyDownloads &&
+        type == 'video' &&
+        !_isAudioFile(current)) {
       final target = File('${_stem(current.path)}-audio.m4a');
       final output = await DeviceResources.instance.extractAudio(
         current.path,
@@ -77,6 +79,12 @@ class PostProcessor {
       }
     }
     return PostProcessResult(file: current, warning: warning);
+  }
+
+  bool _isAudioFile(File file) {
+    final name = file.path.toLowerCase();
+    return RegExp(r'\.(mp3|m4a|aac|ogg|oga|opus|wav|flac|weba)$')
+        .hasMatch(name);
   }
 
   bool _needsRepair(File file) {

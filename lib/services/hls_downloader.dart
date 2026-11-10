@@ -27,6 +27,22 @@ class HlsCanceled implements Exception {
   const HlsCanceled();
 }
 
+class HlsVariantInfo {
+  const HlsVariantInfo({
+    required this.uri,
+    required this.label,
+    required this.bandwidth,
+    this.width,
+    this.height,
+  });
+
+  final Uri uri;
+  final String label;
+  final int bandwidth;
+  final int? width;
+  final int? height;
+}
+
 class _HlsVariant {
   const _HlsVariant({
     required this.uri,
@@ -119,6 +135,22 @@ class _HlsPlaylist {
   bool get isMaster => variants.isNotEmpty;
 }
 
+class _LiveState {
+  const _LiveState({
+    required this.seen,
+    required this.videoIndex,
+    required this.audioIndex,
+    this.videoInitUri,
+    this.audioInitUri,
+  });
+
+  final Set<String> seen;
+  final int videoIndex;
+  final int audioIndex;
+  final String? videoInitUri;
+  final String? audioInitUri;
+}
+
 class HlsDownloader {
   HlsDownloader({
     this.workers = 4,
@@ -135,6 +167,8 @@ class HlsDownloader {
     Map<String, String> headers = const {},
     required void Function(int completedSegments, int totalSegments) onProgress,
     bool Function()? isCancelled,
+    bool audioOnly = false,
+    void Function()? onLiveDetected,
   }) async {
     final uri = Uri.tryParse(url);
     if (uri == null || !{'http', 'https'}.contains(uri.scheme)) {
@@ -159,6 +193,47 @@ class HlsDownloader {
           media = await _loadPlaylist(client, variant.uri, headers);
         }
       }
+      final audioRendition = _audioRendition(root, variant);
+      final audioUri = audioRendition?.uri;
+      final hasVideoAudio = _variantIncludesAudio(variant);
+      final separateAudio = audioUri != null && !hasVideoAudio;
+
+      if (media.isLive) {
+        onLiveDetected?.call();
+        return await _recordLive(
+          client: client,
+          videoPlaylist: media,
+          audioUri: separateAudio ? audioUri : null,
+          variant: variant,
+          destination: destination,
+          workDirectory: workDirectory,
+          headers: headers,
+          onProgress: onProgress,
+          isCancelled: isCancelled,
+          audioOnly: audioOnly && separateAudio,
+        );
+      }
+
+      if (audioOnly && separateAudio) {
+        final audioFile = await _downloadMedia(
+          client: client,
+          playlist: await _loadPlaylist(client, audioUri, headers),
+          baseUrl: url,
+          destination: File('${_stem(destination.path)}.m4a'),
+          workDirectory: Directory(
+            '${workDirectory.path}${Platform.pathSeparator}audio',
+          ),
+          headers: headers,
+          onProgress: onProgress,
+          isCancelled: isCancelled,
+        );
+        return HlsDownloadResult(
+          file: audioFile,
+          isLive: false,
+          variantLabel: 'Audio',
+        );
+      }
+
       if (media.segments.isEmpty) {
         throw const FormatException('The HLS playlist has no media segments.');
       }
@@ -175,11 +250,9 @@ class HlsDownloader {
 
       File output = videoFile;
       String? warning;
-      final audioRendition = _audioRendition(root, variant);
-      if (audioRendition?.uri != null && !_variantIncludesAudio(variant)) {
+      if (separateAudio) {
         try {
-          final audioPlaylist =
-              await _loadPlaylist(client, audioRendition!.uri!, headers);
+          final audioPlaylist = await _loadPlaylist(client, audioUri, headers);
           final audioFile = await _downloadMedia(
             client: client,
             playlist: audioPlaylist,
@@ -210,10 +283,48 @@ class HlsDownloader {
       }
       return HlsDownloadResult(
         file: output,
-        isLive: media.isLive,
+        isLive: false,
         variantLabel: variant?.label ?? 'HLS',
         warning: warning,
       );
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  Future<List<HlsVariantInfo>> listVariants({
+    required String url,
+    Map<String, String> headers = const {},
+  }) async {
+    final uri = Uri.tryParse(url);
+    if (uri == null || !{'http', 'https'}.contains(uri.scheme)) return const [];
+    final client = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 20)
+      ..idleTimeout = const Duration(seconds: 20)
+      ..userAgent = 'Linky Android';
+    ProxyService.applyToClient(client);
+    await SecureDnsService.instance.configure(client);
+    try {
+      final root = await _loadPlaylist(client, uri, headers);
+      if (!root.isMaster) return const [];
+      final variants = root.variants.toList()
+        ..sort((a, b) {
+          final height = (b.height ?? 0).compareTo(a.height ?? 0);
+          if (height != 0) return height;
+          return b.bandwidth.compareTo(a.bandwidth);
+        });
+      return [
+        for (final variant in variants)
+          HlsVariantInfo(
+            uri: variant.uri,
+            label: variant.label,
+            bandwidth: variant.bandwidth,
+            width: variant.width,
+            height: variant.height,
+          ),
+      ];
+    } catch (_) {
+      return const [];
     } finally {
       client.close(force: true);
     }
@@ -251,6 +362,482 @@ class HlsDownloader {
     final codecs = variant?.codecs?.toLowerCase() ?? '';
     if (codecs.isEmpty) return true;
     return RegExp(r'mp4a|ac-3|ec-3|opus|vorbis|flac|aac').hasMatch(codecs);
+  }
+
+  Future<HlsDownloadResult> _recordLive({
+    required HttpClient client,
+    required _HlsPlaylist videoPlaylist,
+    required Uri? audioUri,
+    required _HlsVariant? variant,
+    required File destination,
+    required Directory workDirectory,
+    required Map<String, String> headers,
+    required void Function(int completedSegments, int totalSegments) onProgress,
+    required bool audioOnly,
+    bool Function()? isCancelled,
+  }) async {
+    await workDirectory.create(recursive: true);
+    final state = await _readLiveState(workDirectory);
+    final seen = state.seen;
+    var videoIndex = state.videoIndex;
+    var audioIndex = state.audioIndex;
+    var videoInitUri = state.videoInitUri;
+    var audioInitUri = state.audioInitUri;
+    final videoInit = File(
+      '${workDirectory.path}${Platform.pathSeparator}video-init.bin',
+    );
+    final audioInit = File(
+      '${workDirectory.path}${Platform.pathSeparator}audio-init.bin',
+    );
+    if (videoInitUri != null && !videoInit.existsSync()) {
+      seen.remove('vi:$videoInitUri');
+    }
+    if (audioInitUri != null && !audioInit.existsSync()) {
+      seen.remove('ai:$audioInitUri');
+    }
+    var bytes = _directoryBytes(workDirectory);
+    String? warning;
+    var stopped = false;
+    var idlePolls = 0;
+    var dirty = 0;
+    while (true) {
+      if (isCancelled?.call() == true) {
+        stopped = true;
+        break;
+      }
+      _HlsPlaylist currentVideo;
+      try {
+        currentVideo =
+            await _loadPlaylist(client, videoPlaylist.baseUri, headers);
+      } catch (error) {
+        warning = 'Live playlist refresh failed: $error';
+        if (await _interruptibleDelay(
+            const Duration(seconds: 4), isCancelled)) {
+          stopped = true;
+          break;
+        }
+        continue;
+      }
+      _HlsPlaylist? currentAudio;
+      if (audioUri != null) {
+        try {
+          currentAudio = await _loadPlaylist(client, audioUri, headers);
+        } catch (_) {}
+      }
+      var newSegments = 0;
+
+      if (!audioOnly && currentVideo.initUri != null) {
+        videoInitUri = currentVideo.initUri.toString();
+        final key = 'vi:$videoInitUri';
+        if (seen.add(key)) {
+          try {
+            final raw = await _fetchWithRetry(
+              client,
+              currentVideo.initUri!,
+              headers,
+              byteRangeOffset: currentVideo.initByteRangeOffset,
+              byteRangeLength: currentVideo.initByteRangeLength,
+              isCancelled: isCancelled,
+            );
+            var data = raw;
+            if (currentVideo.initKeyUri != null) {
+              data = await _decrypt(
+                raw,
+                currentVideo.initKeyUri!,
+                currentVideo.initIv,
+                0,
+                headers,
+                client,
+                <String, Uint8List>{},
+              );
+            }
+            await videoInit.writeAsBytes(data, flush: true);
+            bytes += data.length;
+          } catch (error) {
+            warning = 'Live init segment failed: $error';
+          }
+        }
+      }
+      if (currentAudio?.initUri != null) {
+        audioInitUri = currentAudio!.initUri.toString();
+        final key = 'ai:$audioInitUri';
+        if (seen.add(key)) {
+          try {
+            final raw = await _fetchWithRetry(
+              client,
+              currentAudio.initUri!,
+              headers,
+              byteRangeOffset: currentAudio.initByteRangeOffset,
+              byteRangeLength: currentAudio.initByteRangeLength,
+              isCancelled: isCancelled,
+            );
+            var data = raw;
+            if (currentAudio.initKeyUri != null) {
+              data = await _decrypt(
+                raw,
+                currentAudio.initKeyUri!,
+                currentAudio.initIv,
+                0,
+                headers,
+                client,
+                <String, Uint8List>{},
+              );
+            }
+            await audioInit.writeAsBytes(data, flush: true);
+            bytes += data.length;
+          } catch (error) {
+            warning = 'Live audio init segment failed: $error';
+          }
+        }
+      }
+
+      if (!audioOnly || audioUri == null) {
+        for (final segment in currentVideo.segments) {
+          if (isCancelled?.call() == true) {
+            stopped = true;
+            break;
+          }
+          if (!seen.add('v:${segment.uri}')) continue;
+          try {
+            final raw = await _fetchWithRetry(
+              client,
+              segment.uri,
+              headers,
+              byteRangeOffset: segment.byteRangeOffset,
+              byteRangeLength: segment.byteRangeLength,
+              isCancelled: isCancelled,
+            );
+            var data = raw;
+            if (segment.keyUri != null) {
+              data = await _decrypt(
+                raw,
+                segment.keyUri!,
+                segment.iv,
+                segment.sequence,
+                headers,
+                client,
+                <String, Uint8List>{},
+              );
+            }
+            await _writeLivePart(workDirectory, 'v', videoIndex++, data);
+            bytes += data.length;
+            newSegments++;
+            dirty++;
+          } catch (error) {
+            warning = 'Live segment failed: $error';
+          }
+          if (dirty >= 10) {
+            await _saveLiveState(
+              workDirectory,
+              seen,
+              videoIndex,
+              audioIndex,
+              videoInitUri,
+              audioInitUri,
+            );
+            dirty = 0;
+          }
+        }
+        if (stopped) break;
+      }
+
+      if (currentAudio != null) {
+        for (final segment in currentAudio.segments) {
+          if (isCancelled?.call() == true) {
+            stopped = true;
+            break;
+          }
+          if (!seen.add('a:${segment.uri}')) continue;
+          try {
+            final raw = await _fetchWithRetry(
+              client,
+              segment.uri,
+              headers,
+              byteRangeOffset: segment.byteRangeOffset,
+              byteRangeLength: segment.byteRangeLength,
+              isCancelled: isCancelled,
+            );
+            var data = raw;
+            if (segment.keyUri != null) {
+              data = await _decrypt(
+                raw,
+                segment.keyUri!,
+                segment.iv,
+                segment.sequence,
+                headers,
+                client,
+                <String, Uint8List>{},
+              );
+            }
+            await _writeLivePart(workDirectory, 'a', audioIndex++, data);
+            bytes += data.length;
+            newSegments++;
+            dirty++;
+          } catch (error) {
+            warning = 'Live audio segment failed: $error';
+          }
+          if (dirty >= 10) {
+            await _saveLiveState(
+              workDirectory,
+              seen,
+              videoIndex,
+              audioIndex,
+              videoInitUri,
+              audioInitUri,
+            );
+            dirty = 0;
+          }
+        }
+        if (stopped) break;
+      }
+
+      await _saveLiveState(
+        workDirectory,
+        seen,
+        videoIndex,
+        audioIndex,
+        videoInitUri,
+        audioInitUri,
+      );
+      onProgress(videoIndex + audioIndex, 0);
+
+      final videoDone = !currentVideo.isLive;
+      final audioDone = currentAudio == null || !currentAudio.isLive;
+      if (videoDone && audioDone) break;
+      if (newSegments == 0) {
+        idlePolls++;
+      } else {
+        idlePolls = 0;
+      }
+      if (idlePolls > 900) {
+        warning ??= 'Stopped after a long period without new segments.';
+        break;
+      }
+      if (bytes > 8 * 1024 * 1024 * 1024 || videoIndex + audioIndex > 20000) {
+        warning ??= 'Live recording reached the size limit.';
+        break;
+      }
+      final target =
+          currentVideo.targetDuration > 0 ? currentVideo.targetDuration : 6;
+      final delay = max(1000, target * 500);
+      if (await _interruptibleDelay(
+          Duration(milliseconds: delay), isCancelled)) {
+        stopped = true;
+        break;
+      }
+    }
+
+    if (videoIndex == 0 && audioIndex == 0) {
+      throw const FormatException(
+        'No live segments were captured before the stream stopped.',
+      );
+    }
+
+    final merged = await _mergeLiveParts(
+      workDirectory: workDirectory,
+      destination: destination,
+      videoInit: videoInit.existsSync() ? videoInit : null,
+      audioInit: audioInit.existsSync() ? audioInit : null,
+      includeVideo: !audioOnly || audioUri == null,
+    );
+    try {
+      await workDirectory.delete(recursive: true);
+    } catch (_) {}
+    return HlsDownloadResult(
+      file: merged.$1,
+      isLive: true,
+      variantLabel: audioOnly ? 'Audio' : (variant?.label ?? 'HLS'),
+      warning: warning ??
+          merged.$2 ??
+          (stopped
+              ? 'Live recording stopped; saved the captured segments.'
+              : null),
+    );
+  }
+
+  Future<(File, String?)> _mergeLiveParts({
+    required Directory workDirectory,
+    required File destination,
+    required File? videoInit,
+    required File? audioInit,
+    required bool includeVideo,
+  }) async {
+    final videoParts = _liveParts(workDirectory, 'v');
+    final audioParts = _liveParts(workDirectory, 'a');
+    File? videoFile;
+    File? audioFile;
+    String? warning;
+
+    if (includeVideo && videoParts.isNotEmpty) {
+      videoFile = File(
+        '${workDirectory.path}${Platform.pathSeparator}video.bin',
+      );
+      await _concatFiles([
+        if (videoInit != null) videoInit,
+        ...videoParts,
+      ], videoFile);
+    }
+    if (audioParts.isNotEmpty) {
+      audioFile = File(
+        '${workDirectory.path}${Platform.pathSeparator}audio.bin',
+      );
+      await _concatFiles([
+        if (audioInit != null) audioInit,
+        ...audioParts,
+      ], audioFile);
+    }
+    if (videoFile == null && audioFile == null) {
+      throw const FormatException('No live segments were captured.');
+    }
+
+    if (videoFile != null && audioFile != null) {
+      final muxedPath = '${_stem(destination.path)}.mp4';
+      final muxed = await DeviceResources.instance
+          .muxMedia(videoFile.path, audioFile.path, muxedPath);
+      if (muxed != null && await File(muxed).exists()) {
+        return (File(muxed), null);
+      }
+      warning =
+          'The separate live audio track could not be merged; saved the video track only.';
+    }
+
+    final source = videoFile ?? audioFile!;
+    final extension = videoInit != null || audioInit != null
+        ? (videoFile != null ? 'mp4' : 'm4a')
+        : 'ts';
+    final target = File('${_stem(destination.path)}.$extension');
+    await target.parent.create(recursive: true);
+    await _deleteQuietly(target);
+    await source.rename(target.path);
+    return (target, warning);
+  }
+
+  List<File> _liveParts(Directory directory, String prefix) {
+    final files = <File>[];
+    try {
+      for (final entity in directory.listSync()) {
+        if (entity is! File) continue;
+        final name = entity.uri.pathSegments.last;
+        if (name.startsWith('live-$prefix-') && name.endsWith('.bin')) {
+          files.add(entity);
+        }
+      }
+    } catch (_) {}
+    files.sort((a, b) => a.path.compareTo(b.path));
+    return files;
+  }
+
+  Future<void> _writeLivePart(
+    Directory workDirectory,
+    String prefix,
+    int index,
+    Uint8List data,
+  ) async {
+    final file = File(
+      '${workDirectory.path}${Platform.pathSeparator}live-$prefix-'
+      '${index.toString().padLeft(6, '0')}.bin',
+    );
+    await file.writeAsBytes(data, flush: true);
+  }
+
+  Future<void> _concatFiles(List<File> inputs, File output) async {
+    final sink = output.openWrite();
+    try {
+      for (final input in inputs) {
+        if (await input.exists()) await sink.addStream(input.openRead());
+      }
+      await sink.flush();
+      await sink.close();
+    } catch (_) {
+      try {
+        await sink.close();
+      } catch (_) {}
+      rethrow;
+    }
+  }
+
+  int _directoryBytes(Directory directory) {
+    var total = 0;
+    try {
+      for (final entity in directory.listSync()) {
+        if (entity is File) total += entity.lengthSync();
+      }
+    } catch (_) {}
+    return total;
+  }
+
+  Future<bool> _interruptibleDelay(
+    Duration duration,
+    bool Function()? isCancelled,
+  ) async {
+    final end = DateTime.now().add(duration);
+    while (DateTime.now().isBefore(end)) {
+      if (isCancelled?.call() == true) return true;
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+    }
+    return isCancelled?.call() == true;
+  }
+
+  Future<_LiveState> _readLiveState(Directory workDirectory) async {
+    final file = File(
+      '${workDirectory.path}${Platform.pathSeparator}live-state.json',
+    );
+    final seen = <String>{};
+    var videoIndex = 0;
+    var audioIndex = 0;
+    String? videoInitUri;
+    String? audioInitUri;
+    try {
+      if (await file.exists()) {
+        final decoded = jsonDecode(await file.readAsString());
+        if (decoded is Map) {
+          final entries = decoded['seen'];
+          if (entries is List) seen.addAll(entries.whereType<String>());
+          videoIndex = (decoded['videoIndex'] as num?)?.toInt() ?? 0;
+          audioIndex = (decoded['audioIndex'] as num?)?.toInt() ?? 0;
+          videoInitUri = decoded['videoInitUri'] as String?;
+          audioInitUri = decoded['audioInitUri'] as String?;
+        }
+      }
+    } catch (_) {}
+    return _LiveState(
+      seen: seen,
+      videoIndex: videoIndex,
+      audioIndex: audioIndex,
+      videoInitUri: videoInitUri,
+      audioInitUri: audioInitUri,
+    );
+  }
+
+  Future<void> _saveLiveState(
+    Directory workDirectory,
+    Set<String> seen,
+    int videoIndex,
+    int audioIndex,
+    String? videoInitUri,
+    String? audioInitUri,
+  ) async {
+    try {
+      final file = File(
+        '${workDirectory.path}${Platform.pathSeparator}live-state.json',
+      );
+      final list = seen.toList();
+      if (list.length > 6000) {
+        list.removeRange(0, list.length - 6000);
+      }
+      final temporary = File('${file.path}.tmp');
+      await temporary.writeAsString(
+        jsonEncode({
+          'seen': list,
+          'videoIndex': videoIndex,
+          'audioIndex': audioIndex,
+          'videoInitUri': videoInitUri,
+          'audioInitUri': audioInitUri,
+        }),
+        flush: true,
+      );
+      await temporary.rename(file.path);
+    } catch (_) {}
   }
 
   Future<File> _downloadMedia({
@@ -319,6 +906,16 @@ class HlsDownloader {
       await initFile.writeAsBytes(data, flush: true);
     }
 
+    for (var index = 0; index < playlist.segments.length; index++) {
+      final existing = File(
+        '${workDirectory.path}${Platform.pathSeparator}seg-$index.bin',
+      );
+      if (existing.existsSync() && existing.lengthSync() > 0) {
+        completed.add(index);
+      } else {
+        completed.remove(index);
+      }
+    }
     var next = 0;
     var completedCount = completed.length;
     onProgress(completedCount, playlist.segments.length);
@@ -331,7 +928,7 @@ class HlsDownloader {
           if (index >= playlist.segments.length) return;
           if (completed.contains(index)) continue;
           final segment = playlist.segments[index];
-          final raw = await _fetch(
+          final raw = await _fetchWithRetry(
             client,
             segment.uri,
             headers,
@@ -456,6 +1053,41 @@ class HlsDownloader {
       value >>= 8;
     }
     return iv;
+  }
+
+  Future<Uint8List> _fetchWithRetry(
+    HttpClient client,
+    Uri uri,
+    Map<String, String> headers, {
+    int? byteRangeOffset,
+    int? byteRangeLength,
+    bool Function()? isCancelled,
+  }) async {
+    Object? lastError;
+    for (var attempt = 1; attempt <= retries; attempt++) {
+      if (isCancelled?.call() == true) throw const HlsCanceled();
+      try {
+        return await _fetch(
+          client,
+          uri,
+          headers,
+          byteRangeOffset: byteRangeOffset,
+          byteRangeLength: byteRangeLength,
+        );
+      } catch (error) {
+        if (error is HlsCanceled) rethrow;
+        lastError = error;
+        if (attempt < retries) {
+          await Future<void>.delayed(
+            Duration(milliseconds: 500 * attempt),
+          );
+        }
+      }
+    }
+    throw HttpException(
+      'The HLS segment could not be downloaded after $retries attempts: '
+      '$lastError',
+    );
   }
 
   Future<Uint8List> _fetch(

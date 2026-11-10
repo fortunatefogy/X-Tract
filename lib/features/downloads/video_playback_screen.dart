@@ -20,6 +20,24 @@ class VideoPlaybackScreen extends StatefulWidget {
 
 class _VideoPlaybackScreenState extends State<VideoPlaybackScreen> {
   static const _speeds = <double>[0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
+  static const _audioExtensions = {
+    'mp3',
+    'm4a',
+    'aac',
+    'ogg',
+    'oga',
+    'opus',
+    'wav',
+    'flac',
+    'weba',
+    'amr',
+  };
+
+  bool get _isAudio {
+    final name = widget.file.path.toLowerCase();
+    final dot = name.lastIndexOf('.');
+    return dot > 0 && _audioExtensions.contains(name.substring(dot + 1));
+  }
 
   late final VideoPlayerController _controller;
   Object? _error;
@@ -73,8 +91,7 @@ class _VideoPlaybackScreenState extends State<VideoPlaybackScreen> {
     final value = _controller.value;
     if (value.isInitialized) {
       unawaited(
-        PlaybackPositionService.instance
-            .save(widget.file.path, value.position),
+        PlaybackPositionService.instance.save(widget.file.path, value.position),
       );
     }
     _controller
@@ -131,8 +148,7 @@ class _VideoPlaybackScreenState extends State<VideoPlaybackScreen> {
                     ? '${option.toInt()}x'
                     : '${option}x'),
                 trailing: option == _speed
-                    ? const Icon(Icons.check_rounded,
-                        color: AppColors.primary)
+                    ? const Icon(Icons.check_rounded, color: AppColors.primary)
                     : null,
                 onTap: () => Navigator.of(sheetContext).pop(option),
               ),
@@ -156,19 +172,38 @@ class _VideoPlaybackScreenState extends State<VideoPlaybackScreen> {
           fit: StackFit.expand,
           children: [
             if (_error != null)
-              const Center(
+              Center(
                 child: Padding(
-                  padding: EdgeInsets.all(24),
+                  padding: const EdgeInsets.all(24),
                   child: Text(
-                    'This video could not be played. Its format or codec may not be supported.',
+                    _isAudio
+                        ? 'This audio could not be played. Its format or codec may not be supported.'
+                        : 'This video could not be played. Its format or codec may not be supported.',
                     textAlign: TextAlign.center,
-                    style: TextStyle(color: Colors.white),
+                    style: const TextStyle(color: Colors.white),
                   ),
                 ),
               )
             else if (!value.isInitialized)
               const Center(
                 child: CircularProgressIndicator(color: AppColors.primary),
+              )
+            else if (_isAudio)
+              Center(
+                child: Container(
+                  width: 220,
+                  height: 220,
+                  decoration: BoxDecoration(
+                    color: AppColors.forestSurface,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: AppColors.forestBorder),
+                  ),
+                  child: const Icon(
+                    Icons.music_note_rounded,
+                    size: 96,
+                    color: AppColors.primary,
+                  ),
+                ),
               )
             else
               _fill
@@ -251,18 +286,20 @@ class _VideoPlaybackScreenState extends State<VideoPlaybackScreen> {
                       icon: Icons.ios_share_rounded,
                       onPressed: _share,
                     ),
-                    const SizedBox(width: 8),
-                    _CircleButton(
-                      icon: _fill
-                          ? Icons.fit_screen_rounded
-                          : Icons.aspect_ratio_rounded,
-                      onPressed: () => setState(() => _fill = !_fill),
-                    ),
-                    const SizedBox(width: 8),
-                    _CircleButton(
-                      icon: Icons.picture_in_picture_alt_rounded,
-                      onPressed: _enterPip,
-                    ),
+                    if (!_isAudio) ...[
+                      const SizedBox(width: 8),
+                      _CircleButton(
+                        icon: _fill
+                            ? Icons.fit_screen_rounded
+                            : Icons.aspect_ratio_rounded,
+                        onPressed: () => setState(() => _fill = !_fill),
+                      ),
+                      const SizedBox(width: 8),
+                      _CircleButton(
+                        icon: Icons.picture_in_picture_alt_rounded,
+                        onPressed: _enterPip,
+                      ),
+                    ],
                   ],
                 ),
                 const Spacer(),
@@ -361,14 +398,16 @@ class _VideoPlaybackScreenState extends State<VideoPlaybackScreen> {
                             : '${_speed}x',
                         onTap: _pickSpeed,
                       ),
-                      const SizedBox(width: 10),
-                      _Pill(
-                        icon: _fill
-                            ? Icons.fit_screen_rounded
-                            : Icons.aspect_ratio_rounded,
-                        label: _fill ? 'Fill' : 'Fit',
-                        onTap: () => setState(() => _fill = !_fill),
-                      ),
+                      if (!_isAudio) ...[
+                        const SizedBox(width: 10),
+                        _Pill(
+                          icon: _fill
+                              ? Icons.fit_screen_rounded
+                              : Icons.aspect_ratio_rounded,
+                          label: _fill ? 'Fill' : 'Fit',
+                          onTap: () => setState(() => _fill = !_fill),
+                        ),
+                      ],
                     ],
                   ),
                   const SizedBox(height: 6),
@@ -406,8 +445,7 @@ class _CircleButton extends StatelessWidget {
           child: InkWell(
             onTap: onPressed,
             child: Center(
-              child: Icon(icon,
-                  size: size * 0.45, color: AppColors.forestText),
+              child: Icon(icon, size: size * 0.45, color: AppColors.forestText),
             ),
           ),
         ),
@@ -439,8 +477,7 @@ class _Pill extends StatelessWidget {
             borderRadius: BorderRadius.circular(999),
             onTap: onTap,
             child: Padding(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [

@@ -78,9 +78,13 @@ Legend: `[ ]` todo, `[~]` in progress, `[x]` done, `[-]` dropped/deferred.
 - [x] Segment template handling, byte ranges.
 
 ### 2.3 Live stream recording
-- [ ] Continuous playlist/MPD polling; new segment download.
-- [ ] "Stop and save" merges captured segments.
-- [ ] Live indicator + estimated size/progress.
+- [x] Continuous HLS playlist / DASH manifest polling; new segment download
+      (URL dedupe, persisted HLS state, restart recovery).
+- [x] "Stop and save" via the download Pause action merges captured segments;
+      cancel discards them.
+- [x] Live indicator in Downloads; indeterminate progress while recording.
+- [x] Duration-template live DASH window calculation; DRM rejection; audio-only
+      recording skips the video track when a separate audio track exists.
 
 ### 2.4 Subtitles
 - [ ] yt-dlp `writesubtitles` toggle, saved alongside media.
@@ -238,3 +242,6 @@ Legend: `[ ]` todo, `[~]` in progress, `[x]` done, `[-]` dropped/deferred.
 | 2026-11-09 | 5.4 Secure DNS | DoH/DoT presets and custom endpoint for download resolution |
 | 2026-11-08 | 4.4a Pop-up blocking | SuperX port: onCreateWindow gesture/http gate, non-http scheme cancel, setting |
 | 2026-11-08 | 2.6 Blob fix | SuperX port: VideoUtils.getContentTypeByUrl probe from shouldInterceptRequest; blob URLs skipped |
+| 2026-11-10 | 2.3 Live recording | HLS playlist + DASH manifest polling, dedupe/resume, stop-and-save merge, live UI, DRM rejection, audio-only skip; live HLS/DASH tests pass |
+| 2026-11-10 | 5.2a Ad blocker v2 | uBO/ABP network + cosmetic engine, token/host indexing, per-list toggles, OISD built-in, script-level fetch/XHR/sendBeacon blocking |
+| 2026-11-10 | 1.2a Detection v2 | Service-worker interception, shadow-DOM/iframe scan, inline-script URL scan, media-element hooks, MSE appendBuffer capture + save |

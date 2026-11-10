@@ -4,6 +4,8 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 
+import 'adblock/adblock_defaults.dart';
+
 class SettingsService extends ChangeNotifier {
   SettingsService._();
 
@@ -80,8 +82,11 @@ class SettingsService extends ChangeNotifier {
   String _customSearchUrl = '';
   String _customHomeUrl = '';
   String _suggestionListUrl = '';
-  bool _adBlockEnabled = false;
-  List<String> _adBlockListUrls = const [];
+  bool _adBlockEnabled = true;
+  bool _adBlockSeeded = false;
+  bool _adBlockBuiltInEnabled = true;
+  Set<String> _adBlockDisabledListUrls = <String>{};
+  List<String> _adBlockListUrls = AdblockDefaults.recommendedListUrls;
   bool _proxyEnabled = false;
   List<String> _proxyChain = const [];
   String _secureDnsMode = 'off';
@@ -180,6 +185,12 @@ class SettingsService extends ChangeNotifier {
   }
 
   bool get adBlockEnabled => _adBlockEnabled;
+  bool get adBlockSeeded => _adBlockSeeded;
+  bool get adBlockBuiltInEnabled => _adBlockBuiltInEnabled;
+  Set<String> get adBlockDisabledListUrls =>
+      Set.unmodifiable(_adBlockDisabledListUrls);
+  bool isAdBlockListEnabled(String url) =>
+      !_adBlockDisabledListUrls.contains(url);
   List<String> get adBlockListUrls => List.unmodifiable(_adBlockListUrls);
   bool get proxyEnabled => _proxyEnabled;
   List<String> get proxyChain => List.unmodifiable(_proxyChain);
@@ -275,7 +286,18 @@ class SettingsService extends ChangeNotifier {
           _customSearchUrl = decoded['custom_search_url'] as String? ?? '';
           _customHomeUrl = decoded['custom_home_url'] as String? ?? '';
           _suggestionListUrl = decoded['suggestion_list_url'] as String? ?? '';
-          _adBlockEnabled = decoded['adblock_enabled'] as bool? ?? false;
+          _adBlockEnabled = decoded['adblock_enabled'] as bool? ?? true;
+          _adBlockSeeded = decoded['adblock_seeded'] as bool? ?? false;
+          _adBlockBuiltInEnabled =
+              decoded['adblock_builtin_enabled'] as bool? ?? true;
+          final disabledLists = decoded['adblock_disabled_lists'];
+          if (disabledLists is List) {
+            _adBlockDisabledListUrls = disabledLists
+                .whereType<String>()
+                .map((value) => value.trim())
+                .where((value) => value.isNotEmpty)
+                .toSet();
+          }
           final adBlockUrls = decoded['adblock_list_urls'];
           if (adBlockUrls is List) {
             _adBlockListUrls = adBlockUrls
@@ -283,6 +305,16 @@ class SettingsService extends ChangeNotifier {
                 .map((value) => value.trim())
                 .where((value) => value.isNotEmpty)
                 .toList(growable: false);
+          }
+          if (!_adBlockSeeded) {
+            if (_adBlockListUrls.isEmpty) {
+              _adBlockListUrls = AdblockDefaults.recommendedListUrls;
+            }
+            _adBlockSeeded = true;
+          }
+          if (AdblockDefaults.matchesLegacyDefaults(_adBlockListUrls)) {
+            _adBlockListUrls = AdblockDefaults.recommendedListUrls;
+            _adBlockDisabledListUrls.clear();
           }
           _proxyEnabled = decoded['proxy_enabled'] as bool? ?? false;
           final proxies = decoded['proxy_chain'];
@@ -531,6 +563,26 @@ class SettingsService extends ChangeNotifier {
       return;
     }
     _adBlockListUrls = normalized;
+    _adBlockSeeded = true;
+    _adBlockDisabledListUrls.removeWhere((url) => !normalized.contains(url));
+    notifyListeners();
+    await _save();
+  }
+
+  Future<void> setAdBlockListEnabled(String url, bool enabled) async {
+    final normalized = url.trim();
+    if (normalized.isEmpty) return;
+    final changed = enabled
+        ? _adBlockDisabledListUrls.remove(normalized)
+        : _adBlockDisabledListUrls.add(normalized);
+    if (!changed) return;
+    notifyListeners();
+    await _save();
+  }
+
+  Future<void> setAdBlockBuiltInEnabled(bool value) async {
+    if (_adBlockBuiltInEnabled == value) return;
+    _adBlockBuiltInEnabled = value;
     notifyListeners();
     await _save();
   }
@@ -678,6 +730,9 @@ class SettingsService extends ChangeNotifier {
         'custom_home_url': _customHomeUrl,
         'suggestion_list_url': _suggestionListUrl,
         'adblock_enabled': _adBlockEnabled,
+        'adblock_seeded': _adBlockSeeded,
+        'adblock_builtin_enabled': _adBlockBuiltInEnabled,
+        'adblock_disabled_lists': _adBlockDisabledListUrls.toList()..sort(),
         'adblock_list_urls': _adBlockListUrls,
         'proxy_enabled': _proxyEnabled,
         'proxy_chain': _proxyChain,

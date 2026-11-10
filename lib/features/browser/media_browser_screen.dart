@@ -11,7 +11,10 @@ import '../../models/media_item.dart';
 import '../../services/adblock_service.dart';
 import '../../services/bookmarks_service.dart';
 import '../../services/challenge_hosts.dart';
+import '../../services/dash_downloader.dart';
+import '../../services/device_resources.dart';
 import '../../services/download_service.dart';
+import '../../services/hls_downloader.dart';
 import '../../services/history_service.dart';
 import '../../services/media_downloader.dart';
 import '../../services/media_extractor.dart';
@@ -25,6 +28,7 @@ import '../../widgets/app_ui.dart';
 import '../../widgets/media_thumbnail.dart';
 import '../bookmarks/bookmarks_screen.dart';
 import '../downloads/downloads_screen.dart';
+import 'browser_home_page.dart';
 import '../downloads/remote_preview_screen.dart';
 import '../history/history_screen.dart';
 import '../settings/settings_screen.dart';
@@ -117,14 +121,273 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
     } catch (_) {}
   })()''';
 
+  static const _scriptAdBlockScript = r'''(() => {
+    if (window.__linkyScriptAdBlock) return;
+    window.__linkyScriptAdBlock = true;
+    const decisions = Object.create(null);
+    let decisionCount = 0;
+
+    const callBlock = (url, method) => {
+      try {
+        if (window.__linkyAdBlockEnabled !== true) return Promise.resolve(false);
+        const bridge = window.flutter_inappwebview;
+        if (!bridge || typeof bridge.callHandler !== 'function') {
+          return Promise.resolve(false);
+        }
+        const key = method + ' ' + url;
+        if (key in decisions) return Promise.resolve(decisions[key]);
+        const pending = bridge.callHandler(
+          'linkyShouldBlock',
+          url,
+          method,
+          location.href
+        );
+        const timeout = new Promise((resolve) => {
+          setTimeout(() => resolve(false), 1500);
+        });
+        return Promise.race([pending, timeout])
+          .then((value) => {
+            const blocked = value === true || value === 'true';
+            decisions[key] = blocked;
+            decisionCount += 1;
+            if (decisionCount > 800) {
+              for (const stored in decisions) delete decisions[stored];
+              decisionCount = 0;
+            }
+            return blocked;
+          })
+          .catch(() => false);
+      } catch (_) {
+        return Promise.resolve(false);
+      }
+    };
+
+    const resolveUrl = (value) => {
+      try {
+        if (!value) return '';
+        const href = typeof value === 'string'
+          ? value
+          : String(value.url || value);
+        if (!href) return '';
+        const resolved = new URL(href, location.href);
+        if (resolved.protocol !== 'http:' && resolved.protocol !== 'https:') {
+          return '';
+        }
+        return resolved.href;
+      } catch (_) {
+        return '';
+      }
+    };
+
+    try {
+      const originalFetch = window.fetch;
+      if (typeof originalFetch === 'function') {
+        window.fetch = function (input, init) {
+          const args = arguments;
+          const target = resolveUrl(input);
+          if (!target) return originalFetch.apply(this, args);
+          const method = String(
+            (init && init.method) || (input && input.method) || 'GET'
+          ).toUpperCase();
+          return callBlock(target, method).then((blocked) => {
+            if (blocked) {
+              try {
+                return new Response(null, {
+                  status: 204,
+                  statusText: 'No Content',
+                });
+              } catch (_) {
+                return Promise.reject(
+                  new DOMException('Blocked by Linky.', 'AbortError')
+                );
+              }
+            }
+            return originalFetch.apply(this, args);
+          });
+        };
+      }
+    } catch (_) {}
+
+    try {
+      const XHR = window.XMLHttpRequest;
+      if (XHR && XHR.prototype) {
+        const originalOpen = XHR.prototype.open;
+        const originalSend = XHR.prototype.send;
+        XHR.prototype.open = function (method, url) {
+          try {
+            this.__linkyMethod = String(method || 'GET').toUpperCase();
+            this.__linkyUrl = resolveUrl(url);
+          } catch (_) {}
+          return originalOpen.apply(this, arguments);
+        };
+        XHR.prototype.send = function () {
+          const xhr = this;
+          const args = arguments;
+          const target = xhr.__linkyUrl;
+          if (!target) return originalSend.apply(xhr, args);
+          callBlock(target, xhr.__linkyMethod || 'GET').then((blocked) => {
+            if (blocked) {
+              try { xhr.abort(); } catch (_) {}
+              try { xhr.dispatchEvent(new Event('error')); } catch (_) {}
+              try { xhr.dispatchEvent(new Event('loadend')); } catch (_) {}
+              return;
+            }
+            try { originalSend.apply(xhr, args); } catch (_) {}
+          }).catch(() => {
+            try { originalSend.apply(xhr, args); } catch (_) {}
+          });
+        };
+      }
+    } catch (_) {}
+
+    try {
+      if (navigator.sendBeacon) {
+        const originalBeacon = navigator.sendBeacon.bind(navigator);
+        navigator.sendBeacon = function (url, data) {
+          const target = resolveUrl(url);
+          if (!target) return originalBeacon(url, data);
+          callBlock(target, 'POST').then((blocked) => {
+            if (!blocked) {
+              try { originalBeacon(url, data); } catch (_) {}
+            }
+          }).catch(() => {
+            try { originalBeacon(url, data); } catch (_) {}
+          });
+          return true;
+        };
+      }
+    } catch (_) {}
+  })()''';
+
   static const _monitorScript = r'''(() => {
     if (!window.__linkyMediaHooks) {
       window.__linkyMediaHooks = true;
-      const report = (url, type) => { try { window.flutter_inappwebview?.callHandler('linkyFoundMedia', JSON.stringify({url, type})); } catch (_) {} };
+      const report = (url, type, details) => { try { window.flutter_inappwebview?.callHandler('linkyFoundMedia', JSON.stringify({url, type, ...(details || {})})); } catch (_) {} };
       const originalFetch = window.fetch;
       window.fetch = async function(...args) { const response = await originalFetch.apply(this, args); const type = response.headers.get('content-type') || ''; if (/video|audio|image|mpegurl|dash\+xml|pdf|msword|officedocument|text\/plain/i.test(type)) report(response.url, type); return response; };
       const originalOpen = XMLHttpRequest.prototype.open;
       XMLHttpRequest.prototype.open = function(method, url, ...rest) { this.__linkyUrl = url; this.addEventListener('load', function() { const type = this.getResponseHeader('content-type') || ''; if (/video|audio|image|mpegurl|dash\+xml|pdf|msword|officedocument|text\/plain/i.test(type)) report(new URL(this.responseURL || this.__linkyUrl, location.href).href, type); }); return originalOpen.call(this, method, url, ...rest); };
+      const reportMedia = (element) => {
+        try {
+          if (!element || !element.currentSrc) return;
+          const kind = element.tagName === 'AUDIO' ? 'audio' : 'video';
+          report(element.currentSrc, '', {
+            kind,
+            isPlaying: !element.paused && !element.ended && element.readyState >= 2,
+            foundIn: 'media element',
+            durationSeconds: Number.isFinite(element.duration) ? element.duration : null,
+            mseId: (window.__linkyMseUrlIds && window.__linkyMseUrlIds[element.currentSrc]) || null
+          });
+        } catch (_) {}
+      };
+      try {
+        const originalPlay = HTMLMediaElement.prototype.play;
+        HTMLMediaElement.prototype.play = function() {
+          reportMedia(this);
+          return originalPlay.apply(this, arguments);
+        };
+      } catch (_) {}
+      try {
+        ['play', 'loadedmetadata', 'durationchange', 'loadeddata'].forEach(name => {
+          document.addEventListener(name, event => {
+            if (event.target instanceof HTMLMediaElement) reportMedia(event.target);
+          }, true);
+        });
+      } catch (_) {}
+      try {
+        if (!window.__linkyMseHooks && window.MediaSource) {
+          window.__linkyMseHooks = true;
+          const mseIds = new WeakMap();
+          const urlIds = Object.create(null);
+          window.__linkyMseUrlIds = urlIds;
+          const stopped = Object.create(null);
+          const maxBytes = 256 * 1024 * 1024;
+          let nextId = 1;
+          let nextTrack = 1;
+          const send = (handler, ...args) => {
+            try {
+              const bridge = window.flutter_inappwebview;
+              return bridge ? bridge.callHandler(handler, ...args) : Promise.resolve();
+            } catch (_) {
+              return Promise.resolve();
+            }
+          };
+          const idFor = (mediaSource) => {
+            let id = mseIds.get(mediaSource);
+            if (!id) {
+              id = 'mse' + (nextId++);
+              mseIds.set(mediaSource, id);
+            }
+            return id;
+          };
+          const hookBuffer = (mediaSource, buffer, mime) => {
+            if (!mime || !/^(video|audio)\//i.test(mime)) return;
+            const sessionId = idFor(mediaSource);
+            const trackId = sessionId + '-' + (nextTrack++);
+            const kind = /^audio\//i.test(mime) ? 'audio' : 'video';
+            const state = { bytes: 0, stopped: false, queue: Promise.resolve() };
+            send('linkyMseStart', JSON.stringify({ id: sessionId, trackId, kind, mime }));
+            const originalAppend = buffer.appendBuffer.bind(buffer);
+            buffer.appendBuffer = function(data) {
+              try {
+                if (!state.stopped && !stopped[sessionId] && data) {
+                  const view = ArrayBuffer.isView(data)
+                    ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+                    : new Uint8Array(data);
+                  if (state.bytes + view.length > maxBytes) {
+                    state.stopped = true;
+                    send('linkyMseEnd', trackId);
+                  } else {
+                    state.bytes += view.length;
+                    const copy = new Uint8Array(view);
+                    state.queue = state.queue.then(async () => {
+                      const step = 256 * 1024;
+                      for (let offset = 0; offset < copy.length; offset += step) {
+                        const part = copy.subarray(offset, offset + step);
+                        let binary = '';
+                        for (let i = 0; i < part.length; i++) {
+                          binary += String.fromCharCode(part[i]);
+                        }
+                        await send('linkyMseChunk', trackId, btoa(binary));
+                      }
+                    }).catch(() => {});
+                  }
+                }
+              } catch (_) {}
+              return originalAppend(data);
+            };
+          };
+          const originalAdd = MediaSource.prototype.addSourceBuffer;
+          MediaSource.prototype.addSourceBuffer = function(mime) {
+            const buffer = originalAdd.apply(this, arguments);
+            try { hookBuffer(this, buffer, String(mime || '')); } catch (_) {}
+            return buffer;
+          };
+          const originalEnd = MediaSource.prototype.endOfStream;
+          MediaSource.prototype.endOfStream = function() {
+            try {
+              const id = mseIds.get(this);
+              if (id) {
+                stopped[id] = true;
+                send('linkyMseEndAll', id);
+              }
+            } catch (_) {}
+            return originalEnd.apply(this, arguments);
+          };
+          const originalCreate = URL.createObjectURL;
+          URL.createObjectURL = function(object) {
+            const url = originalCreate.apply(this, arguments);
+            try {
+              if (object instanceof MediaSource) {
+                const id = idFor(object);
+                urlIds[url] = id;
+                send('linkyMseUrl', JSON.stringify({ url, id }));
+              }
+            } catch (_) {}
+            return url;
+          };
+        }
+      } catch (_) {}
     }
     const found = new Map();
     const add = (url, kind, details = {}) => {
@@ -140,7 +403,27 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
       } catch (_) {}
     };
     add(location.href, 'page');
-    const roots = [document];
+    const roots = [];
+    let rootBudget = 6000;
+    const collectRoots = (root, depth) => {
+      if (!root || depth > 3 || roots.length > 16 || rootBudget <= 0) return;
+      roots.push(root);
+      let nodes = [];
+      try { nodes = Array.from(root.querySelectorAll('*')); } catch (_) { return; }
+      for (const node of nodes) {
+        if (rootBudget-- <= 0) break;
+        try {
+          if (node.shadowRoot) collectRoots(node.shadowRoot, depth + 1);
+        } catch (_) {}
+        if (node.tagName === 'IFRAME') {
+          try {
+            const inner = node.contentDocument;
+            if (inner) collectRoots(inner, depth + 1);
+          } catch (_) {}
+        }
+      }
+    };
+    collectRoots(document, 0);
     const all = selector => roots.flatMap(root => { try { return Array.from(root.querySelectorAll(selector)); } catch (_) { return []; } });
     const addSrcset = (value, kind) => (value || '').split(',').forEach(part => add(part.trim().split(/\s+/)[0], kind));
     const hasPlayingVideo = all('video').some(media => !media.paused && !media.ended && media.readyState >= 2);
@@ -192,6 +475,35 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
         walk(JSON.parse(script.textContent || 'null'));
       } catch (_) {}
     });
+    try {
+      let matches = 0;
+      let scriptBudget = 2000000;
+      for (const script of all('script:not([src])')) {
+        if (scriptBudget <= 0 || matches >= 200) break;
+        const text = script.textContent || '';
+        if (!text) continue;
+        scriptBudget -= text.length;
+        if (text.length > 500000) continue;
+        for (const match of text.matchAll(/https?:\/\/[^\s"'<>()\\]+?(?:\.m3u8|\.m3u|\.mpd|\.mp4|\.m4v|\.webm|\.mov|\.mp3|\.m4a|\.aac|\.ogg|\.opus|\.flac)(?:\?[^\s"'<>()\\]*)?/gi)) {
+          if (match[0].length > 4096) continue;
+          add(match[0], 'script source');
+          if (++matches >= 200) break;
+        }
+        if (matches < 200) {
+          for (const match of text.matchAll(/["'`](\/[^"'`\\\s]{1,400}\.(?:m3u8|m3u|mpd)(?:\?[^"'`\\\s]*)?)["'`]/gi)) {
+            add(match[1], 'script source');
+            if (++matches >= 200) break;
+          }
+        }
+      }
+    } catch (_) {}
+    all('[data-src],[data-video],[data-video-src],[data-hls],[data-mp4],[data-stream],[data-url]').forEach(el => {
+      ['data-src', 'data-video', 'data-video-src', 'data-hls', 'data-mp4', 'data-stream', 'data-url'].forEach(attr => {
+        const value = el.getAttribute(attr);
+        if (!value || !/^(https?:|\/)/.test(value)) return;
+        add(value, /audio/i.test(attr) ? 'audio' : /image/i.test(attr) ? 'image' : 'video');
+      });
+    });
     performance.getEntriesByType('resource').forEach(entry => {
       if (/\.(mp4|m4v|webm|mov|3gp|m3u8|mpd|ts|m4s|ism|isml|flv|mkv|avi|ogv|mp3|m4a|aac|ogg|oga|opus|wav|flac|weba|jpg|jpeg|png|webp|gif|avif|heic|bmp|svg|vtt|srt|ttml|ass|ssa|pdf|docx?|xlsx?|pptx?|txt)(?:$|[?#])/i.test(entry.name)) {
         add(entry.name, entry.initiatorType || 'resource');
@@ -208,6 +520,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
   int _activeIndex = 0;
   bool _downloading = false;
   int _tabCounter = 0;
+  bool _serviceWorkerHooked = false;
   final _mediaExtractor = MediaExtractor();
 
   _BrowserTab get _tab => _tabs[_activeIndex];
@@ -227,9 +540,11 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
         desktopMode: SettingsService.instance.desktopMode,
       ),
     );
-    _addressController.text = _tab.url;
+    _addressController.text = _tab.showHome ? '' : _tab.url;
     _addressFocus.addListener(_onAddressFocusChanged);
     BookmarksService.instance.addListener(_onBookmarksChanged);
+    unawaited(_installServiceWorkerInterceptor());
+    unawaited(_cleanupStaleMseFiles());
   }
 
   void _onAddressFocusChanged() {
@@ -257,7 +572,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
     setState(() {
       _tabs.add(tab);
       _activeIndex = _tabs.length - 1;
-      _addressController.text = tab.url;
+      _addressController.text = tab.showHome ? '' : tab.url;
     });
   }
 
@@ -265,7 +580,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
     if (index == _activeIndex || index < 0 || index >= _tabs.length) return;
     setState(() {
       _activeIndex = index;
-      _addressController.text = _tab.url;
+      _addressController.text = _tab.showHome ? '' : _tab.url;
     });
   }
 
@@ -274,6 +589,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
     final closing = _tabs[index];
     closing.monitorTimer?.cancel();
     unawaited(_abortBlobCapture(closing, 'Tab closed.'));
+    unawaited(_cleanupMseTab(closing));
     setState(() {
       _tabs.removeAt(index);
       if (_tabs.isEmpty) {
@@ -286,7 +602,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
       }
       if (_activeIndex >= _tabs.length) _activeIndex = _tabs.length - 1;
       if (_activeIndex > index) _activeIndex--;
-      _addressController.text = _tab.url;
+      _addressController.text = _tab.showHome ? '' : _tab.url;
     });
   }
 
@@ -319,6 +635,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
     final destination = uri ?? _searchUri(input);
     _addressController.text = destination.toString();
     _tab.allowNextNavigation = true;
+    _tab.showHome = false;
     _addressFocus.unfocus();
     setState(() {
       _error = null;
@@ -330,6 +647,22 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
   }
 
   Uri _searchUri(String query) => SettingsService.instance.searchUri(query);
+
+  Future<void> _navigateFromHome(String input) async {
+    final value = input.trim();
+    if (value.isEmpty) return;
+    _addressController.text = value;
+    _tab.showHome = false;
+    setState(() {});
+    await _navigate();
+  }
+
+  Future<void> _openUrlFromHome(String url) async {
+    _addressController.text = url;
+    _tab.showHome = false;
+    setState(() {});
+    await _navigate();
+  }
 
   void _considerUrl(_BrowserTab tab, String? rawUrl,
       {String? initiator,
@@ -346,7 +679,10 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
     final uri = Uri.tryParse(rawUrl);
     if (uri == null) return;
     if (ChallengeHosts.isChallenge(uri)) return;
-    if (AdBlockService.instance.shouldBlock(uri)) return;
+    if (AdBlockService.instance
+        .shouldBlock(uri, documentUri: _webUri(tab.url))) {
+      return;
+    }
     final scheme = uri.scheme.toLowerCase();
     // SuperX skips blob: URLs (VideoUtils.getContentTypeByUrl fast-reject).
     // The real media request behind the blob is detected by content-type.
@@ -617,6 +953,73 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
       isPlaying: isPlaying,
       requestHeaders: requestHeaders,
     );
+    final lowerPath = uri.path.toLowerCase();
+    if (lowerPath.endsWith('.m3u8') ||
+        lowerPath.endsWith('.m3u') ||
+        lowerPath.endsWith('.mpd')) {
+      unawaited(_expandStreamVariants(tab, uri.toString(), requestHeaders));
+    }
+  }
+
+  Future<void> _expandStreamVariants(
+    _BrowserTab tab,
+    String url,
+    Map<String, String> headers,
+  ) async {
+    if (tab.expandedStreamUrls.length >= 25) return;
+    if (!tab.expandedStreamUrls.add(url)) return;
+    final generation = tab.generation;
+    final uri = Uri.tryParse(url);
+    if (uri == null) return;
+    final path = uri.path.toLowerCase();
+    final title = tab.title.trim().isNotEmpty ? tab.title : uri.host;
+    try {
+      if (path.endsWith('.m3u8') || path.endsWith('.m3u')) {
+        final variants = await HlsDownloader(workers: 2)
+            .listVariants(url: url, headers: headers);
+        if (variants.length < 2) return;
+        for (final variant in variants) {
+          if (tab.generation != generation) return;
+          _addCandidate(
+            tab,
+            variant.uri.toString(),
+            'video',
+            '$title · ${variant.label}',
+            'application/vnd.apple.mpegurl',
+            width: variant.width,
+            height: variant.height,
+            qualityLabel: variant.label,
+            foundIn: 'HLS variant',
+            sourcePage: url,
+            requestHeaders: headers,
+          );
+        }
+      } else if (path.endsWith('.mpd')) {
+        final representations = await DashDownloader(workers: 2)
+            .listRepresentations(url: url, headers: headers);
+        final videos = representations
+            .where((representation) => representation.kind == 'video')
+            .toList(growable: false);
+        if (videos.length < 2) return;
+        for (final representation in videos) {
+          if (tab.generation != generation) return;
+          _addCandidate(
+            tab,
+            url,
+            'video',
+            '$title · ${representation.label}',
+            'application/dash+xml',
+            width: representation.width,
+            height: representation.height,
+            qualityLabel: representation.label,
+            formatId: representation.id,
+            foundIn: 'DASH representation',
+            sourcePage: url,
+            requestHeaders: headers,
+          );
+        }
+      }
+    } catch (_) {}
   }
 
   Future<void> _probeMediaRequest(
@@ -632,7 +1035,10 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
       return;
     }
     if (ChallengeHosts.isChallenge(uri)) return;
-    if (AdBlockService.instance.shouldBlock(uri)) return;
+    if (AdBlockService.instance
+        .shouldBlock(uri, documentUri: _webUri(tab.url))) {
+      return;
+    }
     // URLs with a known media extension are already detected by the extension
     // scan. Probing them again downloads/consumes the media link before the
     // user taps Download, which breaks one-time/signed URLs (HTTP 400).
@@ -1168,7 +1574,9 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
       requiresExtractor: requiresExtractor,
     );
     _updateHistoryThumbnail(candidate);
-    final key = _normalizedCandidateKey(candidate.url);
+    final baseKey = _normalizedCandidateKey(candidate.url);
+    final key =
+        candidate.formatId == null ? baseKey : '$baseKey|${candidate.formatId}';
     final existingUrl = tab.candidateKeys[key];
     final existing = existingUrl == null ? null : tab.candidates[existingUrl];
     if (existing != null) {
@@ -1340,11 +1748,73 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
                   ? 'video'
                   : 'document';
       final uri = Uri.tryParse((data['url'] ?? '').toString());
-      if (uri != null && {'http', 'https'}.contains(uri.scheme)) {
-        _addCandidate(tab, uri.toString(), kind,
-            uri.pathSegments.isEmpty ? kind : uri.pathSegments.last, mime,
-            foundIn: 'fetch/XHR');
+      if (uri == null) return;
+      final explicitKind = (data['kind'] ?? '').toString();
+      final resolvedKind = explicitKind.isNotEmpty ? explicitKind : kind;
+      final isPlaying = data['isPlaying'] == true;
+      final duration = (data['durationSeconds'] as num?)?.round();
+      if ({'http', 'https'}.contains(uri.scheme)) {
+        _addCandidate(
+          tab,
+          uri.toString(),
+          resolvedKind,
+          uri.pathSegments.isEmpty ? resolvedKind : uri.pathSegments.last,
+          mime,
+          foundIn: (data['foundIn'] ?? 'fetch/XHR').toString(),
+          isPlaying: isPlaying,
+          durationSeconds: duration,
+        );
+      } else if (uri.scheme == 'blob' &&
+          (resolvedKind == 'video' || resolvedKind == 'audio')) {
+        _addCandidate(
+          tab,
+          uri.toString(),
+          resolvedKind,
+          'Browser ${resolvedKind == 'audio' ? 'audio' : 'video'}',
+          mime.isEmpty ? 'video/mp4' : mime,
+          foundIn: (data['foundIn'] ?? 'media element').toString(),
+          isPlaying: isPlaying,
+          durationSeconds: duration,
+        );
       }
+    } catch (_) {}
+  }
+
+  Future<void> _installServiceWorkerInterceptor() async {
+    if (_serviceWorkerHooked) return;
+    _serviceWorkerHooked = true;
+    try {
+      final controller = ServiceWorkerController.instance();
+      await controller.setServiceWorkerClient(
+        ServiceWorkerClient(
+          shouldInterceptRequest: (request) async {
+            final uri = Uri.tryParse(request.url.toString());
+            if (uri == null) return null;
+            if (ChallengeHosts.isChallenge(uri)) return null;
+            if (AdBlockService.instance.shouldBlock(uri)) {
+              return WebResourceResponse(
+                contentType: 'text/plain',
+                data: Uint8List(0),
+              );
+            }
+            if (!mounted) return null;
+            final headers = request.headers ?? const <String, String>{};
+            _considerUrl(
+              _tab,
+              uri.toString(),
+              initiator: 'service worker',
+              requestHeaders: headers,
+            );
+            if (RegExp(
+              r'(video|stream|media|play|live|audio|manifest|hls|dash|m3u8|mpd)',
+              caseSensitive: false,
+            ).hasMatch(uri.path)) {
+              unawaited(_probeMediaRequest(_tab, uri.toString(), headers));
+            }
+            return null;
+          },
+        ),
+      );
     } catch (_) {}
   }
 
@@ -1355,6 +1825,29 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
       const Duration(seconds: 2),
       (_) => _scanPage(tab),
     );
+  }
+
+  Future<void> _injectAdBlockStyles(
+    InAppWebViewController controller,
+    String url,
+  ) async {
+    if (!SettingsService.instance.adBlockEnabled) return;
+    final script = AdBlockService.instance.cosmeticScript(Uri.tryParse(url));
+    if (script.isEmpty) return;
+    try {
+      await controller.evaluateJavascript(source: script);
+    } catch (_) {}
+  }
+
+  void _syncAdBlockState(bool enabled) {
+    final source = 'window.__linkyAdBlockEnabled = $enabled;';
+    for (final tab in _tabs) {
+      final controller = tab.controller;
+      if (controller == null) continue;
+      unawaited(
+        controller.evaluateJavascript(source: source).catchError((_) => null),
+      );
+    }
   }
 
   void _resetCandidates([_BrowserTab? target]) {
@@ -1368,6 +1861,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
     void clear() {
       tab.candidates.clear();
       tab.candidateKeys.clear();
+      tab.expandedStreamUrls.clear();
       tab.blobVideoPlaying = false;
     }
 
@@ -1801,6 +2295,19 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
     final controller = tab.controller;
     if (controller == null) return;
     setState(() => _downloading = true);
+    try {
+      final captured = await _saveMseCapture(tab, item.url);
+      if (captured != null && await captured.exists()) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(
+            'Saved ${captured.uri.pathSegments.last} to Downloads.',
+          ),
+        ));
+        setState(() => _downloading = false);
+        return;
+      }
+    } catch (_) {}
     final capture = Completer<File>();
     tab.blobCapture = capture;
     tab.blobBytesReceived = 0;
@@ -1936,6 +2443,177 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
     if (capture != null && !capture.isCompleted) capture.completeError(error);
   }
 
+  Future<void> _startMseTrack(_BrowserTab tab, String raw) async {
+    try {
+      final data = jsonDecode(raw) as Map<String, dynamic>;
+      final trackId = (data['trackId'] ?? '').toString();
+      final sessionId = (data['id'] ?? '').toString();
+      final kind = (data['kind'] ?? 'video').toString();
+      final mime = (data['mime'] ?? 'video/mp4').toString();
+      if (trackId.isEmpty || sessionId.isEmpty) return;
+      if (tab.mseTracks.containsKey(trackId)) return;
+      final directory = await StorageService.instance.downloadDirectory();
+      final extension = MediaDownloader.extensionForMime(mime);
+      final timestamp = DateTime.now().microsecondsSinceEpoch;
+      final safeId = trackId.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_');
+      final file = File(
+        '${directory.path}${Platform.pathSeparator}.linky-mse-'
+        '$timestamp-$safeId.$extension',
+      );
+      final sink = file.openWrite();
+      tab.mseTracks[trackId] = _MseTrack(
+        trackId: trackId,
+        sessionId: sessionId,
+        kind: kind,
+        mime: mime,
+        file: file,
+        sink: sink,
+      );
+    } catch (_) {}
+  }
+
+  Future<bool> _writeMseTrack(
+    _BrowserTab tab,
+    String trackId,
+    String base64Chunk,
+  ) async {
+    final track = tab.mseTracks[trackId];
+    if (track == null || track.closed) return false;
+    try {
+      final bytes = base64Decode(base64Chunk);
+      if (track.bytes + bytes.length > 256 * 1024 * 1024) {
+        await _finishMseTrack(tab, trackId);
+        return false;
+      }
+      track.sink.add(bytes);
+      track.bytes += bytes.length;
+      return true;
+    } catch (_) {
+      await _finishMseTrack(tab, trackId);
+      return false;
+    }
+  }
+
+  Future<void> _finishMseTrack(_BrowserTab tab, String trackId) async {
+    final track = tab.mseTracks[trackId];
+    if (track == null || track.closed) return;
+    track.closed = true;
+    try {
+      await track.sink.flush();
+      await track.sink.close();
+    } catch (_) {}
+  }
+
+  Future<void> _finishMseSession(_BrowserTab tab, String sessionId) async {
+    final tracks = tab.mseTracks.values
+        .where((track) => track.sessionId == sessionId)
+        .toList(growable: false);
+    for (final track in tracks) {
+      await _finishMseTrack(tab, track.trackId);
+    }
+  }
+
+  void _registerMseUrl(_BrowserTab tab, String raw) {
+    try {
+      final data = jsonDecode(raw) as Map<String, dynamic>;
+      final url = (data['url'] ?? '').toString();
+      final id = (data['id'] ?? '').toString();
+      if (url.startsWith('blob:') && id.isNotEmpty) {
+        tab.mseSessionsByUrl[url] = id;
+      }
+    } catch (_) {}
+  }
+
+  Future<File?> _saveMseCapture(_BrowserTab tab, String blobUrl) async {
+    final sessionId = tab.mseSessionsByUrl[blobUrl];
+    if (sessionId == null) return null;
+    await _finishMseSession(tab, sessionId);
+    final tracks = tab.mseTracks.values
+        .where((track) => track.sessionId == sessionId && track.bytes > 0)
+        .toList(growable: false);
+    if (tracks.isEmpty) {
+      await _cleanupMseSession(tab, sessionId);
+      return null;
+    }
+    _MseTrack? video;
+    _MseTrack? audio;
+    for (final track in tracks) {
+      if (track.kind == 'audio') {
+        if (audio == null || track.bytes > audio.bytes) audio = track;
+      } else {
+        if (video == null || track.bytes > video.bytes) video = track;
+      }
+    }
+    final directory = await StorageService.instance.downloadDirectory();
+    final stamp = DateTime.now().millisecondsSinceEpoch;
+    final base =
+        '${directory.path}${Platform.pathSeparator}browser-video-$stamp';
+    if (video != null && audio != null) {
+      final muxed = await DeviceResources.instance.muxMedia(
+        video.file.path,
+        audio.file.path,
+        '$base.mp4',
+      );
+      if (muxed != null && await File(muxed).exists()) {
+        await _cleanupMseSession(tab, sessionId);
+        return File(muxed);
+      }
+    }
+    final primary = video ?? audio!;
+    final extension = MediaDownloader.extensionForMime(primary.mime);
+    final target = File('$base.$extension');
+    try {
+      await primary.file.copy(target.path);
+      await _cleanupMseSession(tab, sessionId);
+      return target;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _cleanupMseSession(_BrowserTab tab, String sessionId) async {
+    final tracks = tab.mseTracks.values
+        .where((track) => track.sessionId == sessionId)
+        .toList(growable: false);
+    for (final track in tracks) {
+      await _finishMseTrack(tab, track.trackId);
+      tab.mseTracks.remove(track.trackId);
+      try {
+        if (await track.file.exists()) await track.file.delete();
+      } catch (_) {}
+    }
+    tab.mseSessionsByUrl.removeWhere((_, id) => id == sessionId);
+  }
+
+  Future<void> _cleanupStaleMseFiles() async {
+    try {
+      final directory = await StorageService.instance.downloadDirectory();
+      final cutoff = DateTime.now().subtract(const Duration(days: 1));
+      await for (final entity in directory.list()) {
+        if (entity is! File) continue;
+        if (!entity.uri.pathSegments.last.startsWith('.linky-mse-')) continue;
+        try {
+          final stat = await entity.stat();
+          if (stat.modified.isBefore(cutoff)) await entity.delete();
+        } catch (_) {}
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _cleanupMseTab(_BrowserTab tab) async {
+    final tracks = tab.mseTracks.values.toList(growable: false);
+    tab.mseTracks.clear();
+    tab.mseSessionsByUrl.clear();
+    for (final track in tracks) {
+      try {
+        await track.sink.close();
+      } catch (_) {}
+      try {
+        if (await track.file.exists()) await track.file.delete();
+      } catch (_) {}
+    }
+  }
+
   String _formatBytes(int bytes) {
     if (bytes < 1024) return '$bytes B';
     if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(0)} KB';
@@ -2008,6 +2686,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
       'other': 'Other media',
     };
     var filterUnwanted = SettingsService.instance.filterJunkMedia;
+    var categoryFilter = videosOnly ? 'video' : 'all';
     final picked = <String, MediaItem>{};
     showModalBottomSheet<void>(
       context: context,
@@ -2078,6 +2757,47 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
               ..clear()
               ..addEntries(ordered);
           }
+          final counts = <String, int>{
+            for (final category in categoryOrder)
+              category: grouped[category]?.values.fold<int>(
+                        0,
+                        (sum, options) => sum + options.length,
+                      ) ??
+                  0,
+          };
+          final presentCategories = categoryOrder
+              .where((category) => (counts[category] ?? 0) > 0)
+              .toList(growable: false);
+          final effectiveFilter =
+              categoryFilter == 'all' || (counts[categoryFilter] ?? 0) > 0
+                  ? categoryFilter
+                  : 'all';
+          final totalCount =
+              counts.values.fold<int>(0, (sum, value) => sum + value);
+          Widget categoryChip(String value, String label, int count) {
+            final selected = effectiveFilter == value;
+            final palette = sheetContext.palette;
+            return Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: ChoiceChip(
+                selected: selected,
+                showCheckmark: false,
+                selectedColor: AppColors.primary,
+                backgroundColor: palette.card,
+                side: BorderSide(
+                  color: selected ? AppColors.primary : palette.border,
+                ),
+                labelStyle: AppText.body(
+                  12,
+                  weight: selected ? FontWeight.w700 : FontWeight.w600,
+                  color: selected ? Colors.white : palette.foreground,
+                ),
+                label: Text('$label ($count)'),
+                onSelected: (_) => setSheetState(() => categoryFilter = value),
+              ),
+            );
+          }
+
           return SafeArea(
             child: SizedBox(
               height: 500,
@@ -2111,8 +2831,28 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
                       SettingsService.instance.setFilterJunkMedia(value);
                     },
                   ),
+                  if (!videosOnly && presentCategories.length > 1)
+                    SizedBox(
+                      height: 44,
+                      child: ListView(
+                        scrollDirection: Axis.horizontal,
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                        children: [
+                          categoryChip('all', 'All', totalCount),
+                          for (final category in presentCategories)
+                            categoryChip(
+                              category,
+                              categoryLabels[category]!,
+                              counts[category] ?? 0,
+                            ),
+                        ],
+                      ),
+                    ),
                   ...categoryOrder
-                      .where(grouped.containsKey)
+                      .where((category) =>
+                          grouped.containsKey(category) &&
+                          (effectiveFilter == 'all' ||
+                              effectiveFilter == category))
                       .expand((category) => [
                             Padding(
                               padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
@@ -2333,8 +3073,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
                   padding: const EdgeInsets.fromLTRB(20, 4, 12, 8),
                   child: Row(
                     children: [
-                      Expanded(
-                          child: Text('Tabs', style: AppText.heading(18))),
+                      Expanded(child: Text('Tabs', style: AppText.heading(18))),
                       TextButton.icon(
                         onPressed: () => setSheetState(() => _addTab()),
                         icon: const Icon(Icons.add_rounded, size: 18),
@@ -2434,6 +3173,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
     for (final tab in _tabs) {
       tab.monitorTimer?.cancel();
       unawaited(_abortBlobCapture(tab, 'Browser closed.'));
+      unawaited(_cleanupMseTab(tab));
     }
     _addressFocus.dispose();
     _addressController.dispose();
@@ -2580,16 +3320,40 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
 
   Widget _buildWebView(_BrowserTab tab) => InAppWebView(
         key: ValueKey('linky-browser-webview-${tab.id}'),
-        initialUrlRequest: URLRequest(url: WebUri(tab.initialUrl)),
+        initialUrlRequest: URLRequest(
+          url: WebUri(tab.initialUrl.isEmpty ? 'about:blank' : tab.initialUrl),
+        ),
         initialSettings: _webSettings(tab),
         initialUserScripts: UnmodifiableListView([
           UserScript(
             source: _webrtcBlockScript,
             injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
           ),
+          UserScript(
+            source: _monitorScript,
+            injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+            forMainFrameOnly: false,
+          ),
           if (SettingsService.instance.blockPopups)
             UserScript(
               source: _popupGuardScript,
+              injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+              forMainFrameOnly: false,
+            ),
+          UserScript(
+            source:
+                'window.__linkyAdBlockEnabled = ${SettingsService.instance.adBlockEnabled};',
+            injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+            forMainFrameOnly: false,
+          ),
+          UserScript(
+            source: _scriptAdBlockScript,
+            injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+            forMainFrameOnly: false,
+          ),
+          if (SettingsService.instance.adBlockEnabled)
+            UserScript(
+              source: AdBlockService.instance.baseCosmeticScript(),
               injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
               forMainFrameOnly: false,
             ),
@@ -2632,6 +3396,22 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
             },
           );
           controller.addJavaScriptHandler(
+            handlerName: 'linkyShouldBlock',
+            callback: (args) {
+              if (args.isEmpty) return false;
+              final uri = Uri.tryParse(args.first.toString());
+              if (uri == null) return false;
+              final document =
+                  args.length > 2 ? Uri.tryParse(args[2].toString()) : null;
+              return AdBlockService.instance.shouldBlock(
+                uri,
+                documentUri: document != null && document.host.isNotEmpty
+                    ? document
+                    : _webUri(tab.url),
+              );
+            },
+          );
+          controller.addJavaScriptHandler(
             handlerName: 'linkyOpenTab',
             callback: (args) {
               if (args.isEmpty) return;
@@ -2669,21 +3449,66 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
               args.isEmpty ? 'Video capture failed.' : args.first.toString(),
             ),
           );
+          controller.addJavaScriptHandler(
+            handlerName: 'linkyMseStart',
+            callback: (args) => args.isEmpty
+                ? null
+                : _startMseTrack(tab, args.first.toString()),
+          );
+          controller.addJavaScriptHandler(
+            handlerName: 'linkyMseChunk',
+            callback: (args) => args.length < 2
+                ? false
+                : _writeMseTrack(
+                    tab,
+                    args[0].toString(),
+                    args[1].toString(),
+                  ),
+          );
+          controller.addJavaScriptHandler(
+            handlerName: 'linkyMseEnd',
+            callback: (args) => args.isEmpty
+                ? null
+                : _finishMseTrack(tab, args.first.toString()),
+          );
+          controller.addJavaScriptHandler(
+            handlerName: 'linkyMseEndAll',
+            callback: (args) => args.isEmpty
+                ? null
+                : _finishMseSession(tab, args.first.toString()),
+          );
+          controller.addJavaScriptHandler(
+            handlerName: 'linkyMseUrl',
+            callback: (args) => args.isEmpty
+                ? null
+                : _registerMseUrl(tab, args.first.toString()),
+          );
         },
         onLoadStart: (controller, url) {
           if (!mounted) return;
+          unawaited(_cleanupMseTab(tab));
           tab.ytDlpInspectedUrl = null;
           tab.ytDlpRetried.clear();
           tab.generation++;
           tab.candidates.clear();
           tab.candidateKeys.clear();
+          tab.expandedStreamUrls.clear();
           _clearClickedLink(tab);
           tab.blobVideoPlaying = false;
           tab.loading = true;
           tab.progress = 0;
-          if (url != null) tab.url = url.toString();
+          if (url != null) {
+            final loaded = url.toString();
+            if (loaded == 'about:blank') {
+              tab.showHome = true;
+              tab.url = '';
+            } else {
+              tab.showHome = false;
+              tab.url = loaded;
+            }
+          }
           if (tab == _tab) {
-            _addressController.text = tab.url;
+            _addressController.text = tab.showHome ? '' : tab.url;
             setState(() {});
           }
         },
@@ -2697,10 +3522,23 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
           if (!mounted) return;
           tab.loading = false;
           tab.progress = 1;
-          if (url != null) tab.url = url.toString();
+          if (url != null) {
+            final loaded = url.toString();
+            if (loaded == 'about:blank') {
+              tab.showHome = true;
+              tab.url = '';
+            } else {
+              tab.showHome = false;
+              tab.url = loaded;
+            }
+          }
           if (tab == _tab) {
-            _addressController.text = tab.url;
+            _addressController.text = tab.showHome ? '' : tab.url;
             setState(() {});
+          }
+          if (tab.showHome) {
+            _updateNavigationState(tab);
+            return;
           }
           _recordVisit(url, controller);
           controller.getTitle().then((title) {
@@ -2712,6 +3550,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
             }
           });
           _startMonitoring(tab);
+          _injectAdBlockStyles(controller, url?.toString() ?? tab.url);
           _extractPageWithYtDlp(tab, url?.toString() ?? tab.url);
           _updateNavigationState(tab);
         },
@@ -2719,15 +3558,23 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
           if (url == null) return;
           final next = url.toString();
           final previous = tab.url;
-          tab.url = next;
-          if (tab == _tab) _addressController.text = next;
-          if (next != previous) {
+          if (next == 'about:blank') {
+            tab.showHome = true;
+            tab.url = '';
+          } else {
+            tab.showHome = false;
+            tab.url = next;
+          }
+          if (tab == _tab) {
+            _addressController.text = tab.showHome ? '' : next;
+          }
+          if (next != previous && !tab.showHome) {
             tab.ytDlpInspectedUrl = null;
             tab.ytDlpRetried.clear();
             _resetCandidates(tab);
             _recordVisit(url, controller);
           }
-          _extractPageWithYtDlp(tab, next);
+          if (!tab.showHome) _extractPageWithYtDlp(tab, next);
           _updateNavigationState(tab);
           if (tab == _tab) setState(() {});
         },
@@ -2740,7 +3587,10 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
         },
         shouldInterceptRequest: (controller, request) async {
           if (request.isForMainFrame != true &&
-              AdBlockService.instance.shouldBlock(request.url)) {
+              AdBlockService.instance.shouldBlock(
+                request.url,
+                documentUri: _webUri(tab.url),
+              )) {
             return WebResourceResponse(
               contentType: 'text/plain',
               data: Uint8List(0),
@@ -2845,9 +3695,10 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
                     value: settings.adBlockEnabled,
                     title: const Text('Ad blocker'),
                     subtitle: const Text(
-                        'Block ad and pop-under hosts while browsing.'),
+                        'uBlock Origin and EasyList filters for ads, trackers and junk elements.'),
                     onChanged: (value) async {
                       await settings.setAdBlockEnabled(value);
+                      _syncAdBlockState(value);
                       setSheetState(() {});
                     },
                   ),
@@ -3077,8 +3928,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
                       isDense: true,
                       filled: false,
                       hintText: 'Search or enter address',
-                      hintStyle: AppText.body(13,
-                          color: AppColors.forestMuted),
+                      hintStyle: AppText.body(13, color: AppColors.forestMuted),
                       border: InputBorder.none,
                       enabledBorder: InputBorder.none,
                       focusedBorder: InputBorder.none,
@@ -3175,63 +4025,57 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
                 : _playingVideoStrip(),
             Expanded(
               key: const ValueKey('linky-browser-webview-slot'),
-              child: IndexedStack(
-                index: _activeIndex,
+              child: Stack(
                 children: [
-                  for (final tab in _tabs) _buildWebView(tab),
+                  Positioned.fill(
+                    child: IndexedStack(
+                      index: _activeIndex,
+                      children: [
+                        for (final tab in _tabs) _buildWebView(tab),
+                      ],
+                    ),
+                  ),
+                  if (_tab.showHome)
+                    Positioned.fill(
+                      child: BrowserHomePage(
+                        onNavigate: _navigateFromHome,
+                        onOpenUrl: _openUrlFromHome,
+                      ),
+                    ),
+                  if (!_tab.showHome && _candidates.isNotEmpty)
+                    Positioned(
+                      right: 16,
+                      bottom: MediaQuery.viewPaddingOf(context).bottom + 16,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.28),
+                              blurRadius: 14,
+                              offset: const Offset(0, 5),
+                            ),
+                          ],
+                        ),
+                        child: RoundIconButton(
+                          icon: Icons.download_rounded,
+                          tooltip:
+                              '${_candidates.length} media item${_candidates.length == 1 ? '' : 's'} found — open',
+                          background: context.palette.card,
+                          borderColor: context.palette.border,
+                          color: AppColors.primary,
+                          size: 52,
+                          iconSize: 22,
+                          badge: _candidates.length > 99
+                              ? '99+'
+                              : '${_candidates.length}',
+                          onPressed: _showCandidates,
+                        ),
+                      ),
+                    ),
                 ],
               ),
             ),
-            if (_candidates.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
-                child: Material(
-                  color: context.palette.card,
-                  shape: StadiumBorder(
-                    side: BorderSide(color: context.palette.border),
-                  ),
-                  child: InkWell(
-                    customBorder: const StadiumBorder(),
-                    onTap: _showCandidates,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 10,
-                      ),
-                      child: Row(
-                        children: [
-                          Container(
-                            width: 30,
-                            height: 30,
-                            decoration: BoxDecoration(
-                              color: context.palette.accent,
-                              shape: BoxShape.circle,
-                            ),
-                            child: Icon(
-                              Icons.download_rounded,
-                              size: 17,
-                              color: context.palette.accentForeground,
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              '${_candidates.length} media item${_candidates.length == 1 ? '' : 's'} found',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: AppText.body(13,
-                                  weight: FontWeight.w700),
-                            ),
-                          ),
-                          Icon(Icons.keyboard_arrow_up_rounded,
-                              size: 20,
-                              color: context.palette.mutedForeground),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
           ],
         ),
       ),
@@ -3244,13 +4088,14 @@ class _BrowserTab {
     required this.id,
     required String url,
     this.desktopMode = false,
-  })  : initialUrl =
-            url.trim().isEmpty ? SettingsService.instance.startPageUrl : url,
-        url = url.trim().isEmpty ? SettingsService.instance.startPageUrl : url;
+  })  : initialUrl = url.trim(),
+        url = url.trim(),
+        showHome = url.trim().isEmpty;
 
   final String id;
   final String initialUrl;
   String url;
+  bool showHome;
   String title = 'New tab';
   bool desktopMode;
   bool allowNextNavigation = false;
@@ -3275,4 +4120,27 @@ class _BrowserTab {
   File? blobFile;
   int blobBytesReceived = 0;
   final Set<String> probingUrls = {};
+  final Set<String> expandedStreamUrls = {};
+  final Map<String, _MseTrack> mseTracks = {};
+  final Map<String, String> mseSessionsByUrl = {};
+}
+
+class _MseTrack {
+  _MseTrack({
+    required this.trackId,
+    required this.sessionId,
+    required this.kind,
+    required this.mime,
+    required this.file,
+    required this.sink,
+  });
+
+  final String trackId;
+  final String sessionId;
+  final String kind;
+  final String mime;
+  final File file;
+  final IOSink sink;
+  int bytes = 0;
+  bool closed = false;
 }

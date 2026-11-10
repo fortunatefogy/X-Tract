@@ -26,11 +26,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void initState() {
     super.initState();
     _settings.addListener(_refresh);
+    AdBlockService.instance.addListener(_refresh);
   }
 
   @override
   void dispose() {
     _settings.removeListener(_refresh);
+    AdBlockService.instance.removeListener(_refresh);
     super.dispose();
   }
 
@@ -164,12 +166,39 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _refreshAdBlock() async {
     try {
-      final count = await AdBlockService.instance.refresh();
+      final result = await AdBlockService.instance.refresh();
       if (!mounted) return;
-      _toast('Loaded $count blocked host(s).');
+      setState(() {});
+      final failed = result.failed > 0 ? ' (${result.failed} failed)' : '';
+      _toast(
+        'Loaded ${result.networkRules} network and '
+        '${result.cosmeticRules} cosmetic rules from '
+        '${result.lists} list(s)$failed.',
+      );
     } catch (error) {
       _toast('Could not update ad-block rules: $error');
     }
+  }
+
+  Future<void> _restoreAdBlockLists() async {
+    await AdBlockService.instance.restoreRecommendedLists();
+    if (mounted) setState(() {});
+  }
+
+  String _adBlockListStatus(String url) {
+    final service = AdBlockService.instance;
+    if (!service.isListCached(url)) return 'Not downloaded';
+    final updated = service.lastUpdatedFor(url);
+    if (updated == null) return 'Cached';
+    return 'Last updated ${_formatAdBlockDate(updated)}';
+  }
+
+  String _formatAdBlockDate(DateTime value) {
+    final local = value.toLocal();
+    final minute = local.minute.toString().padLeft(2, '0');
+    final hour = local.hour.toString().padLeft(2, '0');
+    return '${local.year}-${local.month.toString().padLeft(2, '0')}-'
+        '${local.day.toString().padLeft(2, '0')} $hour:$minute';
   }
 
   Future<void> _refreshSuggestions() async {
@@ -264,8 +293,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text('Theme',
-                          style: AppText.body(14,
-                              weight: FontWeight.w700)),
+                          style: AppText.body(14, weight: FontWeight.w700)),
                       const SizedBox(height: 10),
                       PillSegment<ThemeMode>(
                         value: _settings.themeMode,
@@ -557,18 +585,33 @@ class _SettingsScreenState extends State<SettingsScreen> {
               children: [
                 _SwitchRow(
                   title: 'Enable ad blocker',
-                  subtitle:
-                      'Blocks ${AdBlockService.instance.ruleCount} known ad host(s)',
+                  subtitle: AdBlockService.instance.isRefreshing
+                      ? 'Updating filters…'
+                      : '${AdBlockService.instance.networkRuleCount} network · '
+                          '${AdBlockService.instance.cosmeticRuleCount} cosmetic rules',
                   value: _settings.adBlockEnabled,
-                  onChanged: _settings.setAdBlockEnabled,
+                  onChanged: (value) async {
+                    await _settings.setAdBlockEnabled(value);
+                    if (value) {
+                      await AdBlockService.instance.ensureLoaded();
+                    }
+                  },
+                ),
+                _SwitchRow(
+                  title: 'OISD Privacy',
+                  subtitle: 'Built-in list · available offline',
+                  value: _settings.adBlockBuiltInEnabled,
+                  onChanged: AdBlockService.instance.setBuiltInEnabled,
                 ),
                 for (final listUrl in _settings.adBlockListUrls)
-                  _TapRow(
-                    title: listUrl,
-                    subtitle: 'Rule list',
-                    trailing: Icon(Icons.close_rounded,
-                        size: 16, color: palette.mutedForeground),
-                    onTap: () async {
+                  _AdBlockListRow(
+                    title: AdBlockService.instance.listLabel(listUrl),
+                    subtitle: listUrl,
+                    status: _adBlockListStatus(listUrl),
+                    value: _settings.isAdBlockListEnabled(listUrl),
+                    onChanged: (value) =>
+                        AdBlockService.instance.setListEnabled(listUrl, value),
+                    onDelete: () async {
                       await AdBlockService.instance.removeListUrl(listUrl);
                       if (mounted) setState(() {});
                     },
@@ -580,10 +623,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
                 _TapRow(
                   title: 'Update ad-block lists',
-                  subtitle: 'Download and cache the selected lists',
-                  enabled: _settings.adBlockListUrls.isNotEmpty,
-                  onTap:
-                      _settings.adBlockListUrls.isEmpty ? null : _refreshAdBlock,
+                  subtitle: AdBlockService.instance.lastUpdated == null
+                      ? 'Download and cache the selected lists'
+                      : 'Last updated ${_formatAdBlockDate(AdBlockService.instance.lastUpdated!)} · '
+                          '${AdBlockService.instance.cachedListCount} cached',
+                  enabled: _settings.adBlockListUrls.isNotEmpty &&
+                      !AdBlockService.instance.isRefreshing,
+                  onTap: _settings.adBlockListUrls.isEmpty
+                      ? null
+                      : _refreshAdBlock,
+                ),
+                _TapRow(
+                  title: 'Restore recommended lists',
+                  subtitle:
+                      'uBlock Origin, EasyList, EasyPrivacy and anti-malware filters',
+                  onTap: _restoreAdBlockLists,
                 ),
               ],
             ),
@@ -711,14 +765,12 @@ class _TapRow extends StatelessWidget {
     required this.subtitle,
     required this.onTap,
     this.enabled = true,
-    this.trailing,
   });
 
   final String title;
   final String subtitle;
   final VoidCallback? onTap;
   final bool enabled;
-  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
@@ -750,16 +802,14 @@ class _TapRow extends StatelessWidget {
                     subtitle,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: AppText.body(12,
-                        color: palette.mutedForeground),
+                    style: AppText.body(12, color: palette.mutedForeground),
                   ),
                 ],
               ),
             ),
             const SizedBox(width: 8),
-            trailing ??
-                Icon(Icons.chevron_right_rounded,
-                    size: 20, color: palette.mutedForeground),
+            Icon(Icons.chevron_right_rounded,
+                size: 20, color: palette.mutedForeground),
           ],
         ),
       ),
@@ -791,16 +841,87 @@ class _SwitchRow extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title,
-                    style: AppText.body(14, weight: FontWeight.w600)),
+                Text(title, style: AppText.body(14, weight: FontWeight.w600)),
                 const SizedBox(height: 2),
                 Text(subtitle,
-                    style: AppText.body(12,
-                        color: palette.mutedForeground)),
+                    style: AppText.body(12, color: palette.mutedForeground)),
               ],
             ),
           ),
           Switch(value: value, onChanged: onChanged),
+        ],
+      ),
+    );
+  }
+}
+
+class _AdBlockListRow extends StatelessWidget {
+  const _AdBlockListRow({
+    required this.title,
+    required this.subtitle,
+    required this.status,
+    required this.value,
+    required this.onChanged,
+    required this.onDelete,
+  });
+
+  final String title;
+  final String subtitle;
+  final String status;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+  final VoidCallback onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.palette;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 10, 6, 10),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppText.body(14, weight: FontWeight.w600),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppText.body(11, color: palette.mutedForeground),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  status,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppText.body(
+                    11,
+                    weight: FontWeight.w600,
+                    color: value
+                        ? palette.accentForeground
+                        : palette.mutedForeground,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Switch(value: value, onChanged: onChanged),
+          IconButton(
+            tooltip: 'Remove list',
+            onPressed: onDelete,
+            icon: Icon(
+              Icons.close_rounded,
+              size: 18,
+              color: palette.mutedForeground,
+            ),
+          ),
         ],
       ),
     );
@@ -833,14 +954,12 @@ class _DropdownRow<T> extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title,
-                    style: AppText.body(14, weight: FontWeight.w600)),
+                Text(title, style: AppText.body(14, weight: FontWeight.w600)),
                 const SizedBox(height: 2),
                 Text(subtitle,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: AppText.body(12,
-                        color: palette.mutedForeground)),
+                    style: AppText.body(12, color: palette.mutedForeground)),
               ],
             ),
           ),
@@ -902,8 +1021,7 @@ class _ProxyRow extends StatelessWidget {
                     style: AppText.body(13, weight: FontWeight.w600)),
                 const SizedBox(height: 2),
                 Text(isPrimary ? 'Primary · tried first' : 'Fallback $index',
-                    style: AppText.body(11,
-                        color: palette.mutedForeground)),
+                    style: AppText.body(11, color: palette.mutedForeground)),
               ],
             ),
           ),
@@ -923,8 +1041,8 @@ class _ProxyRow extends StatelessWidget {
             tooltip: 'Remove',
             visualDensity: VisualDensity.compact,
             onPressed: onRemove,
-            icon: Icon(Icons.close_rounded,
-                size: 18, color: palette.destructive),
+            icon:
+                Icon(Icons.close_rounded, size: 18, color: palette.destructive),
           ),
         ],
       ),

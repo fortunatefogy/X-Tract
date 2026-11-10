@@ -83,10 +83,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
             .where((entity) => entity is File)
             .cast<File>()
             .where((file) {
-              final name = file.uri.pathSegments.last;
-              return !name.startsWith('.') && !name.startsWith('linky_');
-            })
-            .toList(),
+          final name = file.uri.pathSegments.last;
+          return !name.startsWith('.') && !name.startsWith('linky_');
+        }).toList(),
       );
     }
     final modified = <File, DateTime>{};
@@ -134,6 +133,27 @@ class _LibraryScreenState extends State<LibraryScreen> {
     } catch (error) {
       _toast('Could not share the file: $error');
     }
+  }
+
+  Future<void> _shareSelected() async {
+    final paths = _selectedPaths
+        .where((path) => File(path).existsSync())
+        .toList(growable: false);
+    if (paths.isEmpty) {
+      _toast('No selected files are available to share.');
+      return;
+    }
+    try {
+      await _deviceMedia.shareFiles(paths);
+    } catch (error) {
+      _toast('Could not share the files: $error');
+      return;
+    }
+    if (!mounted) return;
+    setState(() {
+      _selectedPaths.clear();
+      _selecting = false;
+    });
   }
 
   Future<void> _openWith(File file) async {
@@ -250,6 +270,14 @@ class _LibraryScreenState extends State<LibraryScreen> {
         .showSnackBar(SnackBar(content: Text(message)));
   }
 
+  void _play(File file) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => VideoPlaybackScreen(file: file),
+      ),
+    );
+  }
+
   void _previewImage(File file) {
     showDialog<void>(
       context: context,
@@ -300,6 +328,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
   bool _isImage(String name) => _category(name) == 'image';
   bool _isVideo(String name) => _category(name) == 'video';
+  bool _isAudio(String name) => _category(name) == 'audio';
 
   String _formatBytes(int bytes) {
     if (bytes < 1024) return '$bytes B';
@@ -342,20 +371,35 @@ class _LibraryScreenState extends State<LibraryScreen> {
                   deviceBytes: 0,
                 );
             final query = _searchController.text.trim().toLowerCase();
-            final files = data.files
-                .where((file) {
-                  final name = file.uri.pathSegments.last.toLowerCase();
-                  if (query.isNotEmpty && !name.contains(query)) return false;
-                  if (_filter != 'all' && _category(name) != _filter) {
-                    return false;
-                  }
-                  return true;
-                })
-                .toList(growable: false);
+            final files = data.files.where((file) {
+              final name = file.uri.pathSegments.last.toLowerCase();
+              if (query.isNotEmpty && !name.contains(query)) return false;
+              if (_filter != 'all' && _category(name) != _filter) {
+                return false;
+              }
+              return true;
+            }).toList(growable: false);
             final selectedBytes = _selectedPaths.fold<int>(
               0,
               (sum, path) => sum + (data.sizeByPath[path] ?? 0),
             );
+            final allVisibleSelected = files.isNotEmpty &&
+                files.every((file) => _selectedPaths.contains(file.path));
+            void toggleSelectAll() {
+              if (files.isEmpty) return;
+              setState(() {
+                _selecting = true;
+                if (allVisibleSelected) {
+                  for (final file in files) {
+                    _selectedPaths.remove(file.path);
+                  }
+                  if (_selectedPaths.isEmpty) _selecting = false;
+                } else {
+                  _selectedPaths.addAll(files.map((file) => file.path));
+                }
+              });
+            }
+
             return Stack(
               children: [
                 ListView(
@@ -385,6 +429,19 @@ class _LibraryScreenState extends State<LibraryScreen> {
                             ],
                           ),
                         ),
+                        if (_selecting)
+                          Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: RoundIconButton(
+                              icon: allVisibleSelected
+                                  ? Icons.deselect_rounded
+                                  : Icons.select_all_rounded,
+                              tooltip: allVisibleSelected
+                                  ? 'Deselect all'
+                                  : 'Select all',
+                              onPressed: files.isEmpty ? null : toggleSelectAll,
+                            ),
+                          ),
                         RoundIconButton(
                           icon: _selecting
                               ? Icons.check_rounded
@@ -431,8 +488,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
                     else ...[
                       Text(
                         '${files.length} file${files.length == 1 ? '' : 's'}',
-                        style: AppText.label(11,
-                            color: palette.mutedForeground),
+                        style:
+                            AppText.label(11, color: palette.mutedForeground),
                       ),
                       const SizedBox(height: 10),
                       for (final file in files) _fileCard(file),
@@ -449,12 +506,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
                       sizeLabel: selectedBytes > 0
                           ? _formatBytes(selectedBytes)
                           : null,
+                      allSelected: allVisibleSelected,
+                      onSelectAll: files.isEmpty ? null : toggleSelectAll,
                       onSave: _selectedPaths.isEmpty
                           ? null
                           : _saveSelectedToGallery,
-                      onDelete: _selectedPaths.isEmpty
-                          ? null
-                          : _deleteSelected,
+                      onShare: _selectedPaths.isEmpty ? null : _shareSelected,
+                      onDelete: _selectedPaths.isEmpty ? null : _deleteSelected,
                     ),
                   ),
               ],
@@ -468,7 +526,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
   Widget _empty(bool searching) => Padding(
         padding: const EdgeInsets.only(top: 24),
         child: EmptyState(
-          icon: searching ? Icons.search_off_rounded : Icons.folder_open_rounded,
+          icon:
+              searching ? Icons.search_off_rounded : Icons.folder_open_rounded,
           title: searching ? 'No matches' : 'Nothing saved yet',
           message: searching
               ? 'Try a different file name or filter.'
@@ -481,6 +540,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
     final name = file.uri.pathSegments.last;
     final isImage = _isImage(name);
     final isVideo = _isVideo(name);
+    final isAudio = _isAudio(name);
     final selected = _selectedPaths.contains(file.path);
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
@@ -491,12 +551,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
             ? () => _toggleSelect(file)
             : isImage
                 ? () => _previewImage(file)
-                : isVideo
-                    ? () => Navigator.of(context).push(
-                          MaterialPageRoute<void>(
-                            builder: (_) => VideoPlaybackScreen(file: file),
-                          ),
-                        )
+                : isVideo || isAudio
+                    ? () => _play(file)
                     : null,
         child: Row(
           children: [
@@ -523,7 +579,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
               ),
             ),
             MediaThumbnail(
-              type: isImage ? 'image' : isVideo ? 'video' : 'document',
+              type: isImage
+                  ? 'image'
+                  : isVideo
+                      ? 'video'
+                      : isAudio
+                          ? 'audio'
+                          : 'document',
               file: isImage || isVideo ? file : null,
               size: 52,
               fallback: Icon(
@@ -531,7 +593,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
                     ? Icons.movie_outlined
                     : isImage
                         ? Icons.image_outlined
-                        : Icons.insert_drive_file_outlined,
+                        : isAudio
+                            ? Icons.music_note_rounded
+                            : Icons.insert_drive_file_outlined,
                 color: palette.mutedForeground,
               ),
             ),
@@ -551,10 +615,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
                     future: file.stat(),
                     builder: (context, stat) => Text(
                       stat.hasData
-                          ? '${_formatBytes(stat.data!.size)} · ${isVideo ? 'Video' : isImage ? 'Image' : 'File'}'
+                          ? '${_formatBytes(stat.data!.size)} · '
+                              '${isVideo ? 'Video' : isImage ? 'Image' : isAudio ? 'Audio' : 'File'}'
                           : 'Saved on this device',
-                      style: AppText.body(11,
-                          color: palette.mutedForeground),
+                      style: AppText.body(11, color: palette.mutedForeground),
                     ),
                   ),
                 ],
@@ -565,16 +629,19 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 icon: Icon(Icons.more_horiz_rounded,
                     color: palette.mutedForeground),
                 onSelected: (value) {
+                  if (value == 'play') _play(file);
                   if (value == 'share') _share(file);
                   if (value == 'open') _openWith(file);
                   if (value == 'rename') _rename(file);
                   if (value == 'delete') _delete(file);
                 },
-                itemBuilder: (context) => const [
-                  PopupMenuItem(value: 'share', child: Text('Share')),
-                  PopupMenuItem(value: 'open', child: Text('Open with')),
-                  PopupMenuItem(value: 'rename', child: Text('Rename')),
-                  PopupMenuItem(value: 'delete', child: Text('Delete')),
+                itemBuilder: (context) => [
+                  if (isAudio || isVideo)
+                    const PopupMenuItem(value: 'play', child: Text('Play')),
+                  const PopupMenuItem(value: 'share', child: Text('Share')),
+                  const PopupMenuItem(value: 'open', child: Text('Open with')),
+                  const PopupMenuItem(value: 'rename', child: Text('Rename')),
+                  const PopupMenuItem(value: 'delete', child: Text('Delete')),
                 ],
               ),
           ],
@@ -620,15 +687,13 @@ class _StorageCard extends StatelessWidget {
               const SizedBox(width: 8),
               Expanded(
                 child: Text('Local storage',
-                    style:
-                        AppText.body(13, weight: FontWeight.w700)),
+                    style: AppText.body(13, weight: FontWeight.w700)),
               ),
               Text(
                 hasDevice
                     ? '${_fmt(total)} of ${_fmt(data.deviceBytes)}'
                     : '${_fmt(total)} saved',
-                style: AppText.body(11,
-                    color: palette.mutedForeground),
+                style: AppText.body(11, color: palette.mutedForeground),
               ),
             ],
           ),
@@ -657,16 +722,14 @@ class _StorageCard extends StatelessWidget {
               Expanded(
                 child: Text(
                   '${data.files.length} file${data.files.length == 1 ? '' : 's'} · ${_fmt(total)} used',
-                  style: AppText.body(11,
-                      color: palette.mutedForeground),
+                  style: AppText.body(11, color: palette.mutedForeground),
                 ),
               ),
               if (hasDevice)
                 Text(
                   '${_fmt(data.freeBytes)} free',
                   style: AppText.body(11,
-                      weight: FontWeight.w700,
-                      color: palette.accentForeground),
+                      weight: FontWeight.w700, color: palette.accentForeground),
                 ),
             ],
           ),
@@ -719,8 +782,7 @@ class _FilterPills extends StatelessWidget {
           return GestureDetector(
             onTap: () => onChanged(option.$1),
             child: Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
               decoration: BoxDecoration(
                 color: selected ? AppColors.primary : palette.card,
                 borderRadius: BorderRadius.circular(AppRadius.pill),
@@ -734,22 +796,18 @@ class _FilterPills extends StatelessWidget {
                   Text(
                     option.$2,
                     style: AppText.body(12,
-                        weight:
-                            selected ? FontWeight.w700 : FontWeight.w600,
-                        color: selected
-                            ? Colors.white
-                            : palette.foreground),
+                        weight: selected ? FontWeight.w700 : FontWeight.w600,
+                        color: selected ? Colors.white : palette.foreground),
                   ),
                   const SizedBox(width: 6),
                   Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 6, vertical: 1),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
                     decoration: BoxDecoration(
                       color: selected
                           ? Colors.white.withValues(alpha: 0.22)
                           : palette.accent,
-                      borderRadius:
-                          BorderRadius.circular(AppRadius.pill),
+                      borderRadius: BorderRadius.circular(AppRadius.pill),
                     ),
                     child: Text(
                       '${option.$3}',
@@ -790,13 +848,19 @@ class _SelectionBar extends StatelessWidget {
   const _SelectionBar({
     required this.count,
     required this.sizeLabel,
+    required this.allSelected,
+    required this.onSelectAll,
     required this.onSave,
+    required this.onShare,
     required this.onDelete,
   });
 
   final int count;
   final String? sizeLabel;
+  final bool allSelected;
+  final VoidCallback? onSelectAll;
   final VoidCallback? onSave;
+  final VoidCallback? onShare;
   final VoidCallback? onDelete;
 
   @override
@@ -827,22 +891,42 @@ class _SelectionBar extends StatelessWidget {
           const SizedBox(width: 10),
           Expanded(
             child: Text(
-              sizeLabel != null ? '$count selected ($sizeLabel)' : '$count selected',
+              sizeLabel != null
+                  ? '$count selected ($sizeLabel)'
+                  : '$count selected',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: AppText.body(12, weight: FontWeight.w700),
             ),
           ),
           RoundIconButton(
+            icon:
+                allSelected ? Icons.deselect_rounded : Icons.select_all_rounded,
+            tooltip: allSelected ? 'Deselect all' : 'Select all',
+            size: 40,
+            onPressed: onSelectAll,
+          ),
+          const SizedBox(width: 6),
+          RoundIconButton(
+            icon: Icons.photo_library_outlined,
+            tooltip: 'Save to Gallery',
+            size: 40,
+            onPressed: onSave,
+          ),
+          const SizedBox(width: 6),
+          RoundIconButton(
+            icon: Icons.share_rounded,
+            tooltip: 'Share selected',
+            size: 40,
+            onPressed: onShare,
+          ),
+          const SizedBox(width: 6),
+          RoundIconButton(
             icon: Icons.delete_outline_rounded,
             tooltip: 'Delete selected',
+            size: 40,
             color: palette.destructive,
             onPressed: onDelete,
-          ),
-          const SizedBox(width: 8),
-          FilledButton(
-            onPressed: onSave,
-            child: const Text('Save to Gallery'),
           ),
         ],
       ),

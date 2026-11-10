@@ -28,6 +28,26 @@ class DashCanceled implements Exception {
   const DashCanceled();
 }
 
+class DashRepresentationInfo {
+  const DashRepresentationInfo({
+    required this.id,
+    required this.kind,
+    required this.label,
+    required this.bandwidth,
+    this.width,
+    this.height,
+    this.mimeType,
+  });
+
+  final String id;
+  final String kind;
+  final String label;
+  final int bandwidth;
+  final int? width;
+  final int? height;
+  final String? mimeType;
+}
+
 class _DashInit {
   const _DashInit({required this.url, this.range});
 
@@ -55,6 +75,7 @@ class _DashRepresentation {
     this.codecs,
     this.init,
     this.singleFile,
+    this.drmProtected = false,
   });
 
   final String id;
@@ -68,6 +89,7 @@ class _DashRepresentation {
   final List<_DashSegment> segments;
   final Uri? singleFile;
   final bool isLive;
+  final bool drmProtected;
 
   bool get hasAudio {
     final value = codecs?.toLowerCase() ?? '';
@@ -99,10 +121,14 @@ class DashDownloader {
     Map<String, String> headers = const {},
     required void Function(int completed, int total) onProgress,
     bool Function()? isCancelled,
+    bool audioOnly = false,
+    void Function()? onLiveDetected,
+    String? preferredFormatId,
   }) async {
     final uri = Uri.tryParse(url);
     if (uri == null || !{'http', 'https'}.contains(uri.scheme)) {
-      throw const FormatException('Only http and https DASH streams are supported.');
+      throw const FormatException(
+          'Only http and https DASH streams are supported.');
     }
     final client = HttpClient()
       ..connectionTimeout = const Duration(seconds: 30)
@@ -112,19 +138,44 @@ class DashDownloader {
     await SecureDnsService.instance.configure(client);
     try {
       final bytes = await _fetch(client, uri, headers);
-      final document = XmlDocument.parse(utf8.decode(bytes, allowMalformed: true));
+      final document =
+          XmlDocument.parse(utf8.decode(bytes, allowMalformed: true));
       final parsed = _parseMpd(document, uri);
       if (parsed.representations.isEmpty) {
         throw const FormatException('The DASH manifest has no media tracks.');
       }
-      final video = _best(parsed.representations, 'video');
+      final video = _byId(parsed.representations, 'video', preferredFormatId) ??
+          _best(parsed.representations, 'video');
       final audio = _best(parsed.representations, 'audio');
       if (video == null && audio == null) {
-        throw const FormatException('The DASH manifest has no playable tracks.');
+        throw const FormatException(
+            'The DASH manifest has no playable tracks.');
       }
+      if ((video?.drmProtected ?? false) || (audio?.drmProtected ?? false)) {
+        throw const FormatException(
+          'This DASH stream is DRM-protected and cannot be downloaded.',
+        );
+      }
+      final liveRecordable = (video?.segments.isNotEmpty ?? false) ||
+          (audio?.segments.isNotEmpty ?? false);
+      if (parsed.isLive && liveRecordable) {
+        onLiveDetected?.call();
+        return await _recordLive(
+          client: client,
+          uri: uri,
+          initial: parsed,
+          destination: destination,
+          workDirectory: workDirectory,
+          headers: headers,
+          onProgress: onProgress,
+          isCancelled: isCancelled,
+          audioOnly: audioOnly,
+        );
+      }
+      final skipVideo = audioOnly && audio != null;
       File? videoFile;
       File? audioFile;
-      if (video != null) {
+      if (video != null && !skipVideo) {
         videoFile = await _downloadRepresentation(
           client: client,
           representation: video,
@@ -138,6 +189,7 @@ class DashDownloader {
         );
       }
       if (audio != null &&
+          !skipVideo &&
           !(video != null && video.hasAudio) &&
           video?.kind != 'audio') {
         audioFile = await _downloadRepresentation(
@@ -149,6 +201,18 @@ class DashDownloader {
           ),
           headers: headers,
           onProgress: (_, __) {},
+          isCancelled: isCancelled,
+        );
+      } else if (skipVideo) {
+        audioFile = await _downloadRepresentation(
+          client: client,
+          representation: audio,
+          destination: File('${_stem(destination.path)}.m4a'),
+          workDirectory: Directory(
+            '${workDirectory.path}${Platform.pathSeparator}audio',
+          ),
+          headers: headers,
+          onProgress: onProgress,
           isCancelled: isCancelled,
         );
       }
@@ -201,6 +265,412 @@ class DashDownloader {
     return sorted.first;
   }
 
+  Future<List<DashRepresentationInfo>> listRepresentations({
+    required String url,
+    Map<String, String> headers = const {},
+  }) async {
+    final uri = Uri.tryParse(url);
+    if (uri == null || !{'http', 'https'}.contains(uri.scheme)) return const [];
+    final client = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 20)
+      ..idleTimeout = const Duration(seconds: 20)
+      ..userAgent = 'Linky Android';
+    ProxyService.applyToClient(client);
+    await SecureDnsService.instance.configure(client);
+    try {
+      final parsed = await _loadParsed(client, uri, headers);
+      final representations = parsed.representations
+          .where((representation) => representation.kind == 'video')
+          .toList()
+        ..sort((a, b) {
+          final height = (b.height ?? 0).compareTo(a.height ?? 0);
+          if (height != 0) return height;
+          return b.bandwidth.compareTo(a.bandwidth);
+        });
+      return [
+        for (final representation in representations)
+          DashRepresentationInfo(
+            id: representation.id,
+            kind: representation.kind,
+            label: representation.label,
+            bandwidth: representation.bandwidth,
+            width: representation.width,
+            height: representation.height,
+            mimeType: representation.mimeType,
+          ),
+      ];
+    } catch (_) {
+      return const [];
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  Future<DashDownloadResult> _recordLive({
+    required HttpClient client,
+    required Uri uri,
+    required _ParsedMpd initial,
+    required File destination,
+    required Directory workDirectory,
+    required Map<String, String> headers,
+    required void Function(int completed, int total) onProgress,
+    bool Function()? isCancelled,
+    required bool audioOnly,
+  }) async {
+    await workDirectory.create(recursive: true);
+    final videoInit = File(
+      '${workDirectory.path}${Platform.pathSeparator}video-init.mp4',
+    );
+    final audioInit = File(
+      '${workDirectory.path}${Platform.pathSeparator}audio-init.mp4',
+    );
+    final seen = <String>{};
+    var videoIndex = 0;
+    var audioIndex = 0;
+    var bytes = 0;
+    final videoId = _best(initial.representations, 'video')?.id;
+    final audioId = _best(initial.representations, 'audio')?.id;
+    var warning = initial.isLive ? null : 'The manifest is no longer live.';
+    var stopped = false;
+    var idlePolls = 0;
+
+    while (true) {
+      if (isCancelled?.call() == true) {
+        stopped = true;
+        break;
+      }
+      _ParsedMpd current;
+      try {
+        current = await _loadParsed(client, uri, headers);
+      } catch (error) {
+        warning = 'Live manifest refresh failed: $error';
+        if (await _interruptibleDelay(
+            const Duration(seconds: 4), isCancelled)) {
+          stopped = true;
+          break;
+        }
+        continue;
+      }
+      final video = _byId(current.representations, 'video', videoId) ??
+          _best(current.representations, 'video');
+      final audio = _byId(current.representations, 'audio', audioId) ??
+          _best(current.representations, 'audio');
+      if ((video?.drmProtected ?? false) || (audio?.drmProtected ?? false)) {
+        throw const FormatException(
+          'This DASH stream is DRM-protected and cannot be downloaded.',
+        );
+      }
+      final includeAudio = audio != null && !(video?.hasAudio ?? false);
+      var newSegments = 0;
+
+      if (!audioOnly || audio == null) {
+        if (video?.init != null) {
+          final key = 'vi:${video!.init!.url}';
+          if (seen.add(key)) {
+            try {
+              final data = await _fetchWithRetry(
+                client,
+                video.init!.url,
+                headers,
+                range: video.init!.range,
+                isCancelled: isCancelled,
+              );
+              await videoInit.writeAsBytes(data, flush: true);
+              bytes += data.length;
+            } catch (error) {
+              warning = 'Live video init segment failed: $error';
+            }
+          }
+        }
+        for (final segment in video?.segments ?? const <_DashSegment>[]) {
+          if (isCancelled?.call() == true) {
+            stopped = true;
+            break;
+          }
+          if (!seen.add('v:${segment.url}')) continue;
+          try {
+            final data = await _fetchWithRetry(
+              client,
+              segment.url,
+              headers,
+              range: segment.range,
+              isCancelled: isCancelled,
+            );
+            await _writeLivePart(workDirectory, 'v', videoIndex++, data);
+            bytes += data.length;
+            newSegments++;
+          } catch (error) {
+            warning = 'Live video segment failed: $error';
+          }
+        }
+        if (stopped) break;
+      }
+
+      if (audio != null && includeAudio) {
+        if (audio.init != null) {
+          final key = 'ai:${audio.init!.url}';
+          if (seen.add(key)) {
+            try {
+              final data = await _fetchWithRetry(
+                client,
+                audio.init!.url,
+                headers,
+                range: audio.init!.range,
+                isCancelled: isCancelled,
+              );
+              await audioInit.writeAsBytes(data, flush: true);
+              bytes += data.length;
+            } catch (error) {
+              warning = 'Live audio init segment failed: $error';
+            }
+          }
+        }
+        for (final segment in audio.segments) {
+          if (isCancelled?.call() == true) {
+            stopped = true;
+            break;
+          }
+          if (!seen.add('a:${segment.url}')) continue;
+          try {
+            final data = await _fetchWithRetry(
+              client,
+              segment.url,
+              headers,
+              range: segment.range,
+              isCancelled: isCancelled,
+            );
+            await _writeLivePart(workDirectory, 'a', audioIndex++, data);
+            bytes += data.length;
+            newSegments++;
+          } catch (error) {
+            warning = 'Live audio segment failed: $error';
+          }
+        }
+        if (stopped) break;
+      }
+
+      onProgress(videoIndex + audioIndex, 0);
+      if (!current.isLive) break;
+      if (newSegments == 0) {
+        idlePolls++;
+      } else {
+        idlePolls = 0;
+      }
+      if (idlePolls > 900) {
+        warning ??= 'Stopped after a long period without new segments.';
+        break;
+      }
+      if (bytes > 8 * 1024 * 1024 * 1024 || videoIndex + audioIndex > 20000) {
+        warning ??= 'Live recording reached the size limit.';
+        break;
+      }
+      final update = current.minimumUpdatePeriod;
+      final delayMs =
+          update == null ? 4000 : (update * 1000).clamp(1000, 10000).toInt();
+      if (await _interruptibleDelay(
+        Duration(milliseconds: delayMs),
+        isCancelled,
+      )) {
+        stopped = true;
+        break;
+      }
+    }
+
+    if (videoIndex == 0 && audioIndex == 0) {
+      throw const FormatException(
+        'No live segments were captured before the stream stopped.',
+      );
+    }
+    final merged = await _mergeLiveParts(
+      workDirectory: workDirectory,
+      destination: destination,
+      videoInit: videoInit.existsSync() ? videoInit : null,
+      audioInit: audioInit.existsSync() ? audioInit : null,
+      includeVideo: !audioOnly || audioIndex == 0,
+    );
+    try {
+      await workDirectory.delete(recursive: true);
+    } catch (_) {}
+    return DashDownloadResult(
+      file: merged.$1,
+      isLive: true,
+      label: audioOnly
+          ? 'Audio'
+          : (_byId(initial.representations, 'video', videoId)?.label ?? 'DASH'),
+      warning: warning ??
+          merged.$2 ??
+          (stopped
+              ? 'Live recording stopped; saved the captured segments.'
+              : null),
+    );
+  }
+
+  Future<_ParsedMpd> _loadParsed(
+    HttpClient client,
+    Uri uri,
+    Map<String, String> headers,
+  ) async {
+    final bytes = await _fetch(client, uri, headers);
+    final document = XmlDocument.parse(
+      utf8.decode(bytes, allowMalformed: true),
+    );
+    return _parseMpd(document, uri);
+  }
+
+  _DashRepresentation? _byId(
+    List<_DashRepresentation> representations,
+    String kind,
+    String? id,
+  ) {
+    if (id == null) return null;
+    for (final representation in representations) {
+      if (representation.kind == kind && representation.id == id) {
+        return representation;
+      }
+    }
+    return null;
+  }
+
+  Future<Uint8List> _fetchWithRetry(
+    HttpClient client,
+    Uri uri,
+    Map<String, String> headers, {
+    (int, int)? range,
+    bool Function()? isCancelled,
+  }) async {
+    Object? lastError;
+    for (var attempt = 1; attempt <= retries; attempt++) {
+      if (isCancelled?.call() == true) throw const DashCanceled();
+      try {
+        return await _fetch(client, uri, headers, range: range);
+      } catch (error) {
+        if (error is DashCanceled) rethrow;
+        lastError = error;
+        if (attempt < retries) {
+          await Future<void>.delayed(
+            Duration(milliseconds: 500 * attempt),
+          );
+        }
+      }
+    }
+    throw HttpException(
+      'The DASH segment could not be downloaded after $retries attempts: '
+      '$lastError',
+    );
+  }
+
+  Future<void> _writeLivePart(
+    Directory workDirectory,
+    String prefix,
+    int index,
+    Uint8List data,
+  ) async {
+    final file = File(
+      '${workDirectory.path}${Platform.pathSeparator}live-$prefix-'
+      '${index.toString().padLeft(6, '0')}.m4s',
+    );
+    await file.writeAsBytes(data, flush: true);
+  }
+
+  List<File> _liveParts(Directory directory, String prefix) {
+    final files = <File>[];
+    try {
+      for (final entity in directory.listSync()) {
+        if (entity is! File) continue;
+        final name = entity.uri.pathSegments.last;
+        if (name.startsWith('live-$prefix-') && name.endsWith('.m4s')) {
+          files.add(entity);
+        }
+      }
+    } catch (_) {}
+    files.sort((a, b) => a.path.compareTo(b.path));
+    return files;
+  }
+
+  Future<void> _concatFiles(List<File> inputs, File output) async {
+    final sink = output.openWrite();
+    try {
+      for (final input in inputs) {
+        if (await input.exists()) await sink.addStream(input.openRead());
+      }
+      await sink.flush();
+      await sink.close();
+    } catch (_) {
+      try {
+        await sink.close();
+      } catch (_) {}
+      rethrow;
+    }
+  }
+
+  Future<bool> _interruptibleDelay(
+    Duration duration,
+    bool Function()? isCancelled,
+  ) async {
+    final end = DateTime.now().add(duration);
+    while (DateTime.now().isBefore(end)) {
+      if (isCancelled?.call() == true) return true;
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+    }
+    return isCancelled?.call() == true;
+  }
+
+  Future<(File, String?)> _mergeLiveParts({
+    required Directory workDirectory,
+    required File destination,
+    required File? videoInit,
+    required File? audioInit,
+    required bool includeVideo,
+  }) async {
+    final videoParts = _liveParts(workDirectory, 'v');
+    final audioParts = _liveParts(workDirectory, 'a');
+    File? videoFile;
+    File? audioFile;
+    String? warning;
+
+    if (includeVideo && videoParts.isNotEmpty) {
+      videoFile = File(
+        '${workDirectory.path}${Platform.pathSeparator}video.bin',
+      );
+      await _concatFiles([
+        if (videoInit != null) videoInit,
+        ...videoParts,
+      ], videoFile);
+    }
+    if (audioParts.isNotEmpty) {
+      audioFile = File(
+        '${workDirectory.path}${Platform.pathSeparator}audio.bin',
+      );
+      await _concatFiles([
+        if (audioInit != null) audioInit,
+        ...audioParts,
+      ], audioFile);
+    }
+    if (videoFile == null && audioFile == null) {
+      throw const FormatException('No live segments were captured.');
+    }
+
+    if (videoFile != null && audioFile != null) {
+      final muxedPath = '${_stem(destination.path)}.mp4';
+      final muxed = await DeviceResources.instance
+          .muxMedia(videoFile.path, audioFile.path, muxedPath);
+      if (muxed != null && await File(muxed).exists()) {
+        return (File(muxed), null);
+      }
+      warning =
+          'The separate live audio track could not be merged; saved the video track only.';
+    }
+
+    final source = videoFile ?? audioFile!;
+    final target = File(
+      '${_stem(destination.path)}.${videoFile != null ? 'mp4' : 'm4a'}',
+    );
+    await target.parent.create(recursive: true);
+    await _deleteQuietly(target);
+    await source.rename(target.path);
+    return (target, warning);
+  }
+
   _ParsedMpd _parseMpd(XmlDocument document, Uri mpdUri) {
     final root = document.rootElement;
     final isLive =
@@ -212,8 +682,20 @@ class DashDownloader {
     final periods = _children(root, 'Period');
     for (final period in periods.isEmpty ? [root] : periods) {
       final periodBase = _applyBaseUrl(rootBase, period);
-      final periodDuration = _parseIsoDuration(period.getAttribute('duration')) ??
-          presentationDuration;
+      final periodDuration =
+          _parseIsoDuration(period.getAttribute('duration')) ??
+              presentationDuration;
+      final liveTiming = _LiveTiming(
+        availabilityStartTime: DateTime.tryParse(
+          root.getAttribute('availabilityStartTime') ?? '',
+        ),
+        publishTime: DateTime.tryParse(root.getAttribute('publishTime') ?? ''),
+        timeShiftBufferDepth:
+            _parseIsoDuration(root.getAttribute('timeShiftBufferDepth')),
+        suggestedPresentationDelay:
+            _parseIsoDuration(root.getAttribute('suggestedPresentationDelay')),
+        periodStart: _parseIsoDuration(period.getAttribute('start')) ?? 0,
+      );
       for (final adaptation in _children(period, 'AdaptationSet')) {
         final adaptationBase = _applyBaseUrl(periodBase, adaptation);
         final adaptationMime =
@@ -236,20 +718,38 @@ class DashDownloader {
             kind: kind,
             mimeType: mime,
             bandwidth:
-                int.tryParse(representation.getAttribute('bandwidth') ?? '') ?? 0,
+                int.tryParse(representation.getAttribute('bandwidth') ?? '') ??
+                    0,
             id: representation.getAttribute('id') ?? '',
             width: int.tryParse(representation.getAttribute('width') ?? ''),
             height: int.tryParse(representation.getAttribute('height') ?? ''),
             codecs: representation.getAttribute('codecs'),
             periodDuration: periodDuration,
             isLive: isLive,
+            liveTiming: liveTiming,
+            drmProtected: _hasDrm(representation) ||
+                _hasDrm(adaptation) ||
+                _hasDrm(period),
           );
           if (parsed != null) representations.add(parsed);
         }
       }
       if (representations.isNotEmpty) break;
     }
-    return _ParsedMpd(representations);
+    return _ParsedMpd(
+      representations,
+      isLive: isLive,
+      minimumUpdatePeriod: _parseIsoDuration(
+        root.getAttribute('minimumUpdatePeriod'),
+      ),
+    );
+  }
+
+  bool _hasDrm(XmlElement element) {
+    for (final child in element.children.whereType<XmlElement>()) {
+      if (child.name.local == 'ContentProtection') return true;
+    }
+    return false;
   }
 
   _DashRepresentation? _segmentsFor({
@@ -267,6 +767,8 @@ class DashDownloader {
     required String? codecs,
     required double? periodDuration,
     required bool isLive,
+    required _LiveTiming liveTiming,
+    required bool drmProtected,
   }) {
     final template = _firstChild(representation, 'SegmentTemplate') ??
         _firstChild(adaptation, 'SegmentTemplate') ??
@@ -289,6 +791,8 @@ class DashDownloader {
         codecs: codecs,
         periodDuration: periodDuration,
         isLive: isLive,
+        liveTiming: liveTiming,
+        drmProtected: drmProtected,
       );
     }
     if (segmentList != null) {
@@ -303,6 +807,7 @@ class DashDownloader {
         height: height,
         codecs: codecs,
         isLive: isLive,
+        drmProtected: drmProtected,
       );
     }
     if (segmentBase != null) {
@@ -318,9 +823,11 @@ class DashDownloader {
         segments: const [],
         singleFile: baseUrl,
         isLive: isLive,
+        drmProtected: drmProtected,
       );
     }
-    if (baseUrl != mpdUri && (mimeType.startsWith('video/') || mimeType.startsWith('audio/'))) {
+    if (baseUrl != mpdUri &&
+        (mimeType.startsWith('video/') || mimeType.startsWith('audio/'))) {
       return _DashRepresentation(
         id: id,
         kind: kind,
@@ -332,6 +839,7 @@ class DashDownloader {
         segments: const [],
         singleFile: baseUrl,
         isLive: isLive,
+        drmProtected: drmProtected,
       );
     }
     return null;
@@ -349,10 +857,13 @@ class DashDownloader {
     required String? codecs,
     required double? periodDuration,
     required bool isLive,
+    required _LiveTiming liveTiming,
+    required bool drmProtected,
   }) {
     final mediaTemplate = template.getAttribute('media');
     if (mediaTemplate == null || mediaTemplate.isEmpty) return null;
-    final timescale = int.tryParse(template.getAttribute('timescale') ?? '') ?? 1;
+    final timescale =
+        int.tryParse(template.getAttribute('timescale') ?? '') ?? 1;
     final startNumber =
         int.tryParse(template.getAttribute('startNumber') ?? '') ?? 1;
     final duration = int.tryParse(template.getAttribute('duration') ?? '') ?? 0;
@@ -413,6 +924,35 @@ class DashDownloader {
           ),
         );
       }
+    } else if (duration > 0 && isLive) {
+      final availability = liveTiming.availabilityStartTime;
+      final segmentDuration = duration / timescale;
+      if (availability != null && segmentDuration > 0) {
+        final reference = liveTiming.publishTime ?? DateTime.now().toUtc();
+        final elapsed =
+            reference.difference(availability).inMilliseconds / 1000.0 -
+                liveTiming.periodStart;
+        final delay =
+            liveTiming.suggestedPresentationDelay ?? segmentDuration * 2;
+        final window = liveTiming.timeShiftBufferDepth == null
+            ? 10
+            : (liveTiming.timeShiftBufferDepth! / segmentDuration).ceil();
+        final count = window.clamp(1, 30);
+        final lastIndex = ((elapsed - delay) / segmentDuration).floor() - 1;
+        for (var offset = count - 1; offset >= 0; offset--) {
+          final index = lastIndex - offset;
+          if (index < 0) continue;
+          final number = startNumber + index;
+          final time = index * duration;
+          segments.add(
+            _DashSegment(
+              url: baseUrl.resolve(
+                _expand(mediaTemplate, id, bandwidth, number, time),
+              ),
+            ),
+          );
+        }
+      }
     }
     if (segments.isEmpty) return null;
     return _DashRepresentation(
@@ -426,6 +966,7 @@ class DashDownloader {
       init: init,
       segments: segments,
       isLive: isLive,
+      drmProtected: drmProtected,
     );
   }
 
@@ -440,6 +981,7 @@ class DashDownloader {
     required int? height,
     required String? codecs,
     required bool isLive,
+    required bool drmProtected,
   }) {
     final initialization = _firstChild(segmentList, 'Initialization');
     final initSource = initialization?.getAttribute('sourceURL');
@@ -473,10 +1015,12 @@ class DashDownloader {
       init: init,
       segments: segments,
       isLive: isLive,
+      drmProtected: drmProtected,
     );
   }
 
-  String _expand(String template, String id, int bandwidth, int number, int time) {
+  String _expand(
+      String template, String id, int bandwidth, int number, int time) {
     var value = template
         .replaceAll(r'$RepresentationID$', id)
         .replaceAll(r'$Bandwidth$', '$bandwidth');
@@ -589,10 +1133,19 @@ class DashDownloader {
       await initFile.writeAsBytes(bytes, flush: true);
     }
 
+    for (var index = 0; index < representation.segments.length; index++) {
+      final existing = File(
+        '${workDirectory.path}${Platform.pathSeparator}seg-$index.m4s',
+      );
+      if (existing.existsSync() && existing.lengthSync() > 0) {
+        completed.add(index);
+      } else {
+        completed.remove(index);
+      }
+    }
     var next = 0;
     onProgress(completed.length, representation.segments.length);
-    final workerCount =
-        min(workers, max(1, representation.segments.length));
+    final workerCount = min(workers, max(1, representation.segments.length));
     await Future.wait(
       List.generate(workerCount, (_) async {
         while (true) {
@@ -677,7 +1230,8 @@ class DashDownloader {
     );
     if (response.statusCode < 200 || response.statusCode >= 300) {
       await _discard(response);
-      throw HttpException('The DASH server returned HTTP ${response.statusCode}.');
+      throw HttpException(
+          'The DASH server returned HTTP ${response.statusCode}.');
     }
     final builder = BytesBuilder(copy: false);
     await for (final chunk in response) {
@@ -704,7 +1258,8 @@ class DashDownloader {
       if (!response.isRedirect) return response;
       if (redirects >= 5) {
         await _discard(response);
-        throw const HttpException('The DASH manifest redirected too many times.');
+        throw const HttpException(
+            'The DASH manifest redirected too many times.');
       }
       final location = response.headers.value(HttpHeaders.locationHeader);
       await _discard(response);
@@ -758,9 +1313,30 @@ class DashDownloader {
   }
 }
 
-class _ParsedMpd {
-  const _ParsedMpd(this.representations);
+class _LiveTiming {
+  const _LiveTiming({
+    this.availabilityStartTime,
+    this.publishTime,
+    this.timeShiftBufferDepth,
+    this.suggestedPresentationDelay,
+    this.periodStart = 0,
+  });
 
-  final List<_DashRepresentation> representations;
+  final DateTime? availabilityStartTime;
+  final DateTime? publishTime;
+  final double? timeShiftBufferDepth;
+  final double? suggestedPresentationDelay;
+  final double periodStart;
 }
 
+class _ParsedMpd {
+  const _ParsedMpd(
+    this.representations, {
+    this.isLive = false,
+    this.minimumUpdatePeriod,
+  });
+
+  final List<_DashRepresentation> representations;
+  final bool isLive;
+  final double? minimumUpdatePeriod;
+}

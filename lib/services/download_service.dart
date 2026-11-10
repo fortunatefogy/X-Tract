@@ -58,6 +58,7 @@ class DownloadRecord {
     this.requestHeaders = const {},
     this.fallbackAttempted = false,
     this.requiresExtractor = false,
+    this.isLive = false,
   });
 
   final String taskId;
@@ -80,6 +81,7 @@ class DownloadRecord {
   final Map<String, String> requestHeaders;
   final bool fallbackAttempted;
   final bool requiresExtractor;
+  final bool isLive;
 
   DownloadRecord copyWith({
     String? taskId,
@@ -92,6 +94,7 @@ class DownloadRecord {
     Object? filePath = _unset,
     Map<String, String>? requestHeaders,
     bool? fallbackAttempted,
+    bool? isLive,
   }) =>
       DownloadRecord(
         taskId: taskId ?? this.taskId,
@@ -115,6 +118,7 @@ class DownloadRecord {
         requestHeaders: requestHeaders ?? this.requestHeaders,
         fallbackAttempted: fallbackAttempted ?? this.fallbackAttempted,
         requiresExtractor: requiresExtractor,
+        isLive: isLive ?? this.isLive,
       );
 
   MediaItem toMediaItem() => MediaItem(
@@ -155,6 +159,7 @@ class DownloadRecord {
         },
         'fallbackAttempted': fallbackAttempted,
         'requiresExtractor': requiresExtractor,
+        'isLive': isLive,
       };
 
   factory DownloadRecord.fromJson(Map<String, dynamic> json) => DownloadRecord(
@@ -183,6 +188,7 @@ class DownloadRecord {
             .map((key, value) => MapEntry(key, value.toString())),
         fallbackAttempted: json['fallbackAttempted'] as bool? ?? false,
         requiresExtractor: json['requiresExtractor'] as bool? ?? false,
+        isLive: json['isLive'] as bool? ?? false,
       );
 }
 
@@ -827,6 +833,8 @@ class DownloadService extends ChangeNotifier {
         workDirectory: work,
         headers: record.requestHeaders,
         isCancelled: () => handle.stopRequested,
+        audioOnly: SettingsService.instance.audioOnlyDownloads,
+        onLiveDetected: () => _markLive(id),
         onProgress: (completed, total) {
           final current = _records[id];
           if (current == null) return;
@@ -882,7 +890,7 @@ class DownloadService extends ChangeNotifier {
         mediaFile,
         result.warning ??
             remuxWarning ??
-            (result.isLive ? 'Live playlist snapshot saved.' : null),
+            (result.isLive ? 'Live recording saved.' : null),
       );
       _records[id] = current.copyWith(
         state: DownloadState.complete,
@@ -890,6 +898,7 @@ class DownloadService extends ChangeNotifier {
         expectedBytes: await post.$1.length(),
         filePath: post.$1.path,
         error: post.$2,
+        isLive: result.isLive,
       );
       _notify(force: true);
       _schedulePersist();
@@ -950,6 +959,9 @@ class DownloadService extends ChangeNotifier {
         workDirectory: work,
         headers: record.requestHeaders,
         isCancelled: () => handle.stopRequested,
+        audioOnly: SettingsService.instance.audioOnlyDownloads,
+        onLiveDetected: () => _markLive(id),
+        preferredFormatId: record.formatId,
         onProgress: (completed, total) {
           final current = _records[id];
           if (current == null) return;
@@ -973,8 +985,7 @@ class DownloadService extends ChangeNotifier {
       final post = await _postProcess(
         record,
         result.file,
-        result.warning ??
-            (result.isLive ? 'Live manifest snapshot saved.' : null),
+        result.warning ?? (result.isLive ? 'Live recording saved.' : null),
       );
       _records[id] = current.copyWith(
         state: DownloadState.complete,
@@ -982,6 +993,7 @@ class DownloadService extends ChangeNotifier {
         expectedBytes: await post.$1.length(),
         filePath: post.$1.path,
         error: post.$2,
+        isLive: result.isLive,
       );
       _notify(force: true);
       _schedulePersist();
@@ -1397,6 +1409,13 @@ class DownloadService extends ChangeNotifier {
           .toList();
       await file.writeAsString(jsonEncode(list));
     } catch (_) {}
+  }
+
+  void _markLive(String id) {
+    final current = _records[id];
+    if (current == null || current.isLive || current.state.isFinal) return;
+    _records[id] = current.copyWith(isLive: true);
+    _notify(force: true);
   }
 
   void _notify({bool force = false}) {

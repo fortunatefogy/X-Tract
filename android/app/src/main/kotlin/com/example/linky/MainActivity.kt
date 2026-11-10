@@ -82,6 +82,19 @@ class MainActivity : FlutterActivity() {
                         }
                     }
                 }
+                "shareFiles" -> {
+                    val paths = call.argument<List<String>>("paths")
+                    if (paths.isNullOrEmpty()) {
+                        result.error("invalid_path", "At least one file path is required.", null)
+                    } else {
+                        try {
+                            launchFilesIntent(paths)
+                            result.success(true)
+                        } catch (error: Exception) {
+                            result.error("share_failed", error.message, null)
+                        }
+                    }
+                }
                 "openWithFile" -> {
                     val path = call.argument<String>("path")
                     if (path == null) {
@@ -425,6 +438,41 @@ class MainActivity : FlutterActivity() {
                 if (action == Intent.ACTION_SEND) "Share file" else "Open with",
             ),
         )
+    }
+
+    private fun launchFilesIntent(paths: List<String>) {
+        val files = paths.map { File(it) }
+        if (files.any { !it.isFile }) {
+            throw IllegalArgumentException("One or more selected files no longer exist.")
+        }
+        val uris = ArrayList<Uri>(files.size)
+        val mimes = ArrayList<String>(files.size)
+        for (file in files) {
+            uris.add(FileProvider.getUriForFile(this, "$packageName.fileprovider", file))
+            val extension = file.extension.lowercase()
+            mimes.add(
+                MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension)
+                    ?: "application/octet-stream",
+            )
+        }
+        val first = mimes.first()
+        val type = when {
+            mimes.all { it == first } -> first
+            mimes.all { it.substringBefore('/') == first.substringBefore('/') } ->
+                "${first.substringBefore('/')}/*"
+            else -> "*/*"
+        }
+        val clip = ClipData.newRawUri(files.first().name, uris.first())
+        for (index in 1 until uris.size) {
+            clip.addItem(ClipData.Item(uris[index]))
+        }
+        val intent = Intent(Intent.ACTION_SEND_MULTIPLE).apply {
+            this.type = type
+            putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
+            clipData = clip
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        startActivity(Intent.createChooser(intent, "Share files"))
     }
 
     private fun saveToPublicDownloads(file: File, displayName: String): Uri? {

@@ -160,7 +160,8 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
         .fold<double>(0, (sum, value) => sum + value);
     final remainingBytes = active.fold<int>(
       0,
-      (sum, record) => sum +
+      (sum, record) =>
+          sum +
           (record.expectedBytes > 0
               ? (record.expectedBytes * (1 - record.progress)).round()
               : 0),
@@ -182,19 +183,19 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text('Downloads',
-                          style: AppText.display(30,
-                              color: palette.foreground)),
+                          style:
+                              AppText.display(30, color: palette.foreground)),
                       const SizedBox(height: 2),
                       Text('Real-time media engine active',
-                          style: AppText.body(12,
-                              color: palette.mutedForeground)),
+                          style:
+                              AppText.body(12, color: palette.mutedForeground)),
                     ],
                   ),
                 ),
                 PopupMenuButton<String>(
                   tooltip: 'Queue tools',
-                  icon: Icon(Icons.more_horiz_rounded,
-                      color: palette.foreground),
+                  icon:
+                      Icon(Icons.more_horiz_rounded, color: palette.foreground),
                   onSelected: (value) {
                     if (value == 'pauseAll') downloads.pauseAll();
                     if (value == 'resumeAll') downloads.resumeAll();
@@ -389,8 +390,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                     record.expectedBytes > 0
                         ? 'Completed · ${_formatBytes(record.expectedBytes)}'
                         : 'Completed',
-                    style:
-                        AppText.body(12, color: palette.mutedForeground),
+                    style: AppText.body(12, color: palette.mutedForeground),
                   ),
                 ],
               ),
@@ -468,8 +468,8 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                             child: Text(record.title,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: AppText.body(14,
-                                    weight: FontWeight.w700)),
+                                style:
+                                    AppText.body(14, weight: FontWeight.w700)),
                           ),
                           const SizedBox(width: 8),
                           Container(
@@ -480,7 +480,10 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                               borderRadius:
                                   BorderRadius.circular(AppRadius.pill),
                             ),
-                            child: Text('$percent%',
+                            child: Text(
+                                record.isLive && record.state.isActive
+                                    ? 'LIVE'
+                                    : '$percent%',
                                 style: AppText.body(10,
                                     weight: FontWeight.w700,
                                     color: palette.accentForeground)),
@@ -492,8 +495,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                         _transferSubtitle(record, sizeDetail, speedLabel),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: AppText.body(12,
-                            color: palette.mutedForeground),
+                        style: AppText.body(12, color: palette.mutedForeground),
                       ),
                     ],
                   ),
@@ -523,8 +525,13 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                             side: BorderSide.none,
                             minimumSize: const Size(0, 44),
                           ),
-                          icon: const Icon(Icons.pause_rounded, size: 18),
-                          label: const Text('Pause'),
+                          icon: Icon(
+                            record.isLive
+                                ? Icons.stop_circle_outlined
+                                : Icons.pause_rounded,
+                            size: 18,
+                          ),
+                          label: Text(record.isLive ? 'Stop & save' : 'Pause'),
                         )
                       : canResume || canRetry
                           ? FilledButton.icon(
@@ -538,8 +545,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                                     : Icons.refresh_rounded,
                                 size: 18,
                               ),
-                              label:
-                                  Text(canResume ? 'Resume' : 'Retry'),
+                              label: Text(canResume ? 'Resume' : 'Retry'),
                             )
                           : OutlinedButton.icon(
                               onPressed: null,
@@ -548,8 +554,8 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                                 side: BorderSide.none,
                                 minimumSize: const Size(0, 44),
                               ),
-                              icon: const Icon(Icons.schedule_rounded,
-                                  size: 18),
+                              icon:
+                                  const Icon(Icons.schedule_rounded, size: 18),
                               label: Text(_stateLabel(record.state)),
                             ),
                 ),
@@ -594,13 +600,15 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
     String sizeDetail,
     String speedLabel,
   ) =>
-      switch (record.state) {
-        DownloadState.queued => '$sizeDetail · Waiting',
-        DownloadState.running => '$sizeDetail$speedLabel',
-        DownloadState.paused => '$sizeDetail · Paused',
-        DownloadState.retrying => '$sizeDetail · Waiting to retry',
-        DownloadState.complete => 'Completed',
-        DownloadState.failed => record.error ?? 'Failed',
-        DownloadState.canceled => 'Canceled',
-      };
+      record.isLive && record.state.isActive
+          ? 'Recording live stream… tap Stop & save to finish'
+          : switch (record.state) {
+              DownloadState.queued => '$sizeDetail · Waiting',
+              DownloadState.running => '$sizeDetail$speedLabel',
+              DownloadState.paused => '$sizeDetail · Paused',
+              DownloadState.retrying => '$sizeDetail · Waiting to retry',
+              DownloadState.complete => 'Completed',
+              DownloadState.failed => record.error ?? 'Failed',
+              DownloadState.canceled => 'Canceled',
+            };
 }
