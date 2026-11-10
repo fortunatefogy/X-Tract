@@ -1,11 +1,179 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'proxy_service.dart';
+import 'secure_dns_service.dart';
+
 import '../models/media_item.dart';
+
+class MediaProbe {
+  const MediaProbe(this.kind, this.mimeType);
+
+  final String kind;
+  final String? mimeType;
+
+  bool get found => kind.isNotEmpty;
+}
 
 class MediaExtractor {
   static const _maxPageBytes = 2 * 1024 * 1024;
   static const _timeout = Duration(seconds: 20);
+
+  static final _probeSkip =
+      RegExp(r'\.(js|css|m4s|ts)$|^blob:', caseSensitive: false);
+
+  final Map<String, (MediaProbe, DateTime)> _probeCache = {};
+
+  /// Port of SuperX `VideoUtils.getContentTypeByUrl`: classify the resource
+  /// from its response content type. Uses a HEAD request first (and only a
+  /// tiny ranged GET when the type is ambiguous) so detection does not
+  /// download or consume the media URL before the user taps Download.
+  Future<MediaProbe> probeUrl(
+    String url, {
+    Map<String, String> headers = const {},
+  }) async {
+    if (_probeSkip.hasMatch(url)) return const MediaProbe('', null);
+    final uri = Uri.tryParse(url);
+    if (uri == null || !{'http', 'https'}.contains(uri.scheme.toLowerCase())) {
+      return const MediaProbe('', null);
+    }
+    final cached = _probeCache[url];
+    if (cached != null &&
+        DateTime.now().difference(cached.$2) < const Duration(minutes: 5)) {
+      return cached.$1;
+    }
+    final client = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 10)
+      ..userAgent = 'Linky Android';
+    ProxyService.applyToClient(client);
+    await SecureDnsService.instance.configure(client);
+    try {
+      var result = await _probeWithHead(client, uri, headers);
+      result ??= await _probeWithGet(client, uri, headers);
+      _probeCache[url] = (result, DateTime.now());
+      return result;
+    } catch (_) {
+      return const MediaProbe('', null);
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  Future<MediaProbe?> _probeWithHead(
+    HttpClient client,
+    Uri uri,
+    Map<String, String> headers,
+  ) async {
+    try {
+      final request = await client.headUrl(uri).timeout(_timeout);
+      request.followRedirects = true;
+      _applyHeaders(request, headers);
+      final response = await request.close().timeout(_timeout);
+      final status = response.statusCode;
+      final contentType =
+          response.headers.contentType?.mimeType.toLowerCase() ?? '';
+      _cancelResponse(response);
+      if (status < 200 || status >= 300) return null;
+      if (contentType.contains('application/octet-stream')) return null;
+      return _classify(contentType, const []);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<MediaProbe> _probeWithGet(
+    HttpClient client,
+    Uri uri,
+    Map<String, String> headers,
+  ) async {
+    try {
+      final request = await client.getUrl(uri).timeout(_timeout);
+      request.followRedirects = true;
+      _applyHeaders(request, headers);
+      request.headers.set(HttpHeaders.rangeHeader, 'bytes=0-511');
+      final response = await request.close().timeout(_timeout);
+      final contentType =
+          response.headers.contentType?.mimeType.toLowerCase() ?? '';
+      final classified = _classify(contentType, const []);
+      if (classified.kind.isNotEmpty) {
+        _cancelResponse(response);
+        return classified;
+      }
+      final prefix = await _readPrefix(response, 512);
+      return _classify(contentType, prefix);
+    } catch (_) {
+      return const MediaProbe('', null);
+    }
+  }
+
+  void _applyHeaders(HttpClientRequest request, Map<String, String> headers) {
+    for (final entry in headers.entries) {
+      final name = entry.key.toLowerCase();
+      if (name == 'host' || name == 'content-length' || name == 'range') {
+        continue;
+      }
+      try {
+        request.headers.set(entry.key, entry.value);
+      } catch (_) {}
+    }
+  }
+
+  MediaProbe _classify(String contentType, List<int> prefix) {
+    if (contentType.contains('mpegurl')) {
+      return const MediaProbe('video', 'application/vnd.apple.mpegurl');
+    }
+    if (contentType.contains('dash')) {
+      return const MediaProbe('video', 'application/dash+xml');
+    }
+    if (contentType.contains('video')) return MediaProbe('video', contentType);
+    if (contentType.contains('audio')) return MediaProbe('audio', contentType);
+    if (contentType.contains('application/octet-stream')) {
+      final text = String.fromCharCodes(prefix);
+      if (text.startsWith('#EXTM3U')) {
+        return const MediaProbe('video', 'application/vnd.apple.mpegurl');
+      }
+      if (text.contains('<MPD')) {
+        return const MediaProbe('video', 'application/dash+xml');
+      }
+    }
+    return const MediaProbe('', null);
+  }
+
+  void _cancelResponse(HttpClientResponse response) {
+    try {
+      response.listen(null, cancelOnError: true).cancel();
+    } catch (_) {}
+  }
+
+  Future<List<int>> _readPrefix(
+    HttpClientResponse response,
+    int maximum,
+  ) async {
+    final buffer = <int>[];
+    final completer = Completer<void>();
+    late StreamSubscription<List<int>> subscription;
+    subscription = response.listen(
+      (chunk) {
+        buffer.addAll(chunk);
+        if (buffer.length >= maximum && !completer.isCompleted) {
+          completer.complete();
+        }
+      },
+      onDone: () {
+        if (!completer.isCompleted) completer.complete();
+      },
+      onError: (_) {
+        if (!completer.isCompleted) completer.complete();
+      },
+      cancelOnError: true,
+    );
+    await completer.future;
+    try {
+      await subscription.cancel();
+    } catch (_) {}
+    return buffer.take(maximum).toList(growable: false);
+  }
 
   Future<List<MediaItem>> extract(String rawUrl) async {
     final uri = Uri.tryParse(rawUrl.trim());
@@ -23,7 +191,7 @@ class MediaExtractor {
           type: directType,
           sourcePage: uri.toString(),
           mimeType: _mimeFromPath(uri),
-          isDownloadable: !_isPlaylist(uri),
+          isDownloadable: _isHls(uri) || _isDash(uri) || !_isPlaylist(uri),
         ),
       ];
     }
@@ -73,6 +241,8 @@ class MediaExtractor {
     final client = HttpClient()
       ..connectionTimeout = const Duration(seconds: 10)
       ..userAgent = 'Linky Android';
+    ProxyService.applyToClient(client);
+    await SecureDnsService.instance.configure(client);
     try {
       final headRequest = await client.headUrl(uri).timeout(_timeout);
       headRequest.followRedirects = true;
@@ -91,11 +261,13 @@ class MediaExtractor {
             type: headType,
             sourcePage: rawUrl,
             mimeType: headResponse.headers.contentType?.mimeType,
-            isDownloadable: !_isPlaylist(headUri) &&
-                !headResponse.headers.contentType!.mimeType
-                    .contains('mpegurl') &&
-                !headResponse.headers.contentType!.mimeType
-                    .contains('dash+xml'),
+            isDownloadable: _isHls(headUri) ||
+                _isDash(headUri) ||
+                headResponse.headers.contentType!.mimeType
+                    .contains('mpegurl') ||
+                headResponse.headers.contentType!.mimeType
+                    .contains('dash+xml') ||
+                !_isPlaylist(headUri),
           ),
         ];
       }
@@ -110,9 +282,11 @@ class MediaExtractor {
             type: responseType,
             sourcePage: rawUrl,
             mimeType: contentType,
-            isDownloadable: !_isPlaylist(finalUri) &&
-                !contentType.contains('mpegurl') &&
-                !contentType.contains('dash+xml'),
+            isDownloadable: _isHls(finalUri) ||
+                _isDash(finalUri) ||
+                contentType.contains('mpegurl') ||
+                contentType.contains('dash+xml') ||
+                !_isPlaylist(finalUri),
           ),
         ];
       }
@@ -446,7 +620,7 @@ class MediaExtractor {
               sourcePage: sourcePage,
               mimeType: _mimeFromPath(uri),
               foundIn: foundIn,
-              isDownloadable: !_isPlaylist(uri),
+              isDownloadable: _isHls(uri) || _isDash(uri) || !_isPlaylist(uri),
             ));
   }
 
@@ -494,6 +668,12 @@ class MediaExtractor {
   bool _isPlaylist(Uri uri) =>
       RegExp(r'\.(m3u8|m3u|mpd|pls|asx)$', caseSensitive: false)
           .hasMatch(uri.path);
+
+  bool _isHls(Uri uri) =>
+      RegExp(r'\.(m3u8|m3u)$', caseSensitive: false).hasMatch(uri.path);
+
+  bool _isDash(Uri uri) =>
+      RegExp(r'\.mpd$', caseSensitive: false).hasMatch(uri.path);
 
   String? _typeFromMime(String mime) {
     final normalized = mime.toLowerCase();

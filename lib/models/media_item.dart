@@ -49,6 +49,32 @@ class MediaItem {
   final String? qualityLabel;
   final bool requiresExtractor;
 
+  MediaItem withTitle(String value) => MediaItem(
+        url: url,
+        type: type,
+        title: value,
+        mimeType: mimeType,
+        thumbnail: thumbnail,
+        sourcePage: sourcePage,
+        size: size,
+        alt: alt,
+        width: width,
+        height: height,
+        foundIn: foundIn,
+        requestHeaders: requestHeaders,
+        isDownloadable: isDownloadable,
+        isPlaying: isPlaying,
+        durationSeconds: durationSeconds,
+        uploader: uploader,
+        formatId: formatId,
+        audioFormatId: audioFormatId,
+        audioUrl: audioUrl,
+        audioMimeType: audioMimeType,
+        groupTitle: groupTitle,
+        qualityLabel: qualityLabel,
+        requiresExtractor: requiresExtractor,
+      );
+
   factory MediaItem.fromJson(Map<String, dynamic> json) => MediaItem(
         url: json['url'] as String,
         type: json['type'] as String? ?? 'unknown',

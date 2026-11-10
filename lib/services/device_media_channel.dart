@@ -9,4 +9,12 @@ class DeviceMediaChannel {
       {'path': path},
     );
   }
+
+  Future<void> shareFile(String path) async {
+    await _channel.invokeMethod<bool>('shareFile', {'path': path});
+  }
+
+  Future<void> openWithFile(String path) async {
+    await _channel.invokeMethod<bool>('openWithFile', {'path': path});
+  }
 }

@@ -13,6 +13,7 @@ dependencies:
   video_player: ^2.9.5
   flutter_inappwebview: ^6.1.5
   background_downloader: ^9.5.9
+  xml: ^6.5.0
 
 dev_dependencies:
   flutter_test:

@@ -5,9 +5,12 @@ import '../../models/media_item.dart';
 import '../../services/download_service.dart';
 import '../../services/media_extractor.dart';
 import '../../services/platform_extractor.dart';
+import '../../services/settings_service.dart';
 import '../../services/shared_link_channel.dart';
 import '../browser/media_browser_screen.dart';
+import '../bookmarks/bookmarks_screen.dart';
 import '../downloads/downloads_screen.dart';
+import '../history/history_screen.dart';
 import '../settings/settings_screen.dart';
 import '../../widgets/media_thumbnail.dart';
 
@@ -125,13 +128,19 @@ class _HomeScreenState extends State<HomeScreen> {
       _chosenQuality.clear();
     });
     try {
+      final settings = SettingsService.instance;
       final found = <String, MediaItem>{};
       var failed = 0;
+      var skippedBySiteFilter = 0;
       var engineUnavailable = false;
       for (final url in urls) {
         try {
           var extracted = <MediaItem>[];
+          final siteAllowed =
+              !settings.onlySupportedSites || settings.isSupportedSite(url);
+          if (!siteAllowed) skippedBySiteFilter++;
           try {
+            if (!siteAllowed) throw const FormatException('site filtered');
             final platformExtractor = PlatformExtractor();
             final cookieText = await platformExtractor.cookieTextFor(url);
             extracted = await platformExtractor.extract(
@@ -139,10 +148,12 @@ class _HomeScreenState extends State<HomeScreen> {
               cookieText: cookieText,
             );
           } catch (_) {
-            engineUnavailable = true;
+            if (siteAllowed) engineUnavailable = true;
           }
           if (extracted.isEmpty) extracted = await _extractor.extract(url);
           for (final item in extracted) {
+            if (!settings.isTypeEnabled(item.type)) continue;
+            if (!settings.passesSizeThreshold(item.size)) continue;
             found.putIfAbsent(item.url, () => item);
           }
         } catch (_) {
@@ -153,9 +164,11 @@ class _HomeScreenState extends State<HomeScreen> {
       if (!mounted) return;
       setState(() {
         if (found.isEmpty) {
-          _error = failed == urls.length
-              ? 'Could not inspect these links. Check the connection and try again.'
-              : 'No public media was found at these links.';
+          _error = skippedBySiteFilter == urls.length
+              ? 'Only supported sites is on and none of these links are on the list.'
+              : failed == urls.length
+                  ? 'Could not inspect these links. Check the connection and try again.'
+                  : 'No public media was found at these links.';
         } else if (found.values.every((item) => !item.isDownloadable) &&
             engineUnavailable) {
           _error =
@@ -343,6 +356,24 @@ class _HomeScreenState extends State<HomeScreen> {
               icon: const Icon(Icons.public),
             ),
             IconButton(
+              tooltip: 'History',
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => const HistoryScreen(),
+                ),
+              ),
+              icon: const Icon(Icons.history),
+            ),
+            IconButton(
+              tooltip: 'Bookmarks',
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => const BookmarksScreen(),
+                ),
+              ),
+              icon: const Icon(Icons.bookmark_outline),
+            ),
+            IconButton(
               tooltip: 'Downloads folder',
               onPressed: () => Navigator.of(context).push(
                 MaterialPageRoute<void>(
@@ -503,6 +534,80 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       );
 
+  List<MediaItem> _audioOnlyOptions(_MediaGroup group) {
+    if (group.type != 'video') return const [];
+    final options = <String, MediaItem>{};
+    final hasGroupTitle = group.items.any((item) => item.groupTitle != null);
+    for (final item in _media) {
+      if (item.type != 'audio') continue;
+      final sameGroup =
+          hasGroupTitle && item.groupTitle == group.title;
+      final samePage = !hasGroupTitle &&
+          item.sourcePage != null &&
+          item.sourcePage == group.items.first.sourcePage;
+      if (!sameGroup && !samePage) continue;
+      final key = '${item.formatId ?? ''}|${item.audioUrl ?? item.url}';
+      options.putIfAbsent(key, () => item);
+    }
+    if (options.isEmpty) {
+      final paired = _audioOnlyOption(group);
+      if (paired != null) options['paired|${paired.url}'] = paired;
+    }
+    final list = options.values.toList(growable: false)
+      ..sort((a, b) => (a.qualityLabel ?? '').compareTo(b.qualityLabel ?? ''));
+    return list;
+  }
+
+  Future<void> _chooseAudioOnly(_MediaGroup group) async {
+    final options = _audioOnlyOptions(group);
+    if (options.isEmpty) return;
+    if (options.length == 1) {
+      await _queueAudioOnly(options.first);
+      return;
+    }
+    final chosen = await showModalBottomSheet<MediaItem>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(20, 4, 20, 12),
+              child: Text(
+                'Choose audio format',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+              ),
+            ),
+            ...options.map((item) {
+              final details = <String>[
+                if (item.qualityLabel != null) item.qualityLabel!,
+                if (item.size != null && item.size! > 0)
+                  _formatBytes(item.size!),
+                if (item.durationSeconds != null)
+                  _formatDuration(item.durationSeconds!),
+              ];
+              return ListTile(
+                leading: const Icon(Icons.audiotrack),
+                title: Text(
+                  details.isEmpty ? 'Audio' : details.first,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                subtitle: details.length > 1
+                    ? Text(details.skip(1).join(' · '))
+                    : null,
+                onTap: () => Navigator.of(sheetContext).pop(item),
+              );
+            }),
+          ],
+        ),
+      ),
+    );
+    if (chosen != null) await _queueAudioOnly(chosen);
+  }
+
   MediaItem? _audioOnlyOption(_MediaGroup group) {
     if (group.type != 'video') return null;
     for (final item in group.items) {
@@ -563,7 +668,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final previewUrl =
         item.thumbnail ?? (item.type == 'image' ? item.url : null);
     final showQualityPicker = group.items.length > 1;
-    final audioOption = _audioOnlyOption(group);
+    final audioOptions = _audioOnlyOptions(group);
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: Card(
@@ -638,13 +743,15 @@ class _HomeScreenState extends State<HomeScreen> {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
-              if (audioOption != null)
+              if (audioOptions.isNotEmpty)
                 Align(
                   alignment: Alignment.centerLeft,
                   child: TextButton.icon(
-                    onPressed: () => _queueAudioOnly(audioOption),
+                    onPressed: () => _chooseAudioOnly(group),
                     icon: const Icon(Icons.audiotrack, size: 18),
-                    label: const Text('Download audio only'),
+                    label: Text(audioOptions.length > 1
+                        ? 'Download audio only (${audioOptions.length} formats)'
+                        : 'Download audio only'),
                     style: TextButton.styleFrom(
                       padding: EdgeInsets.zero,
                       visualDensity: VisualDensity.compact,

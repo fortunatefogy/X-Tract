@@ -1,5 +1,8 @@
 import 'dart:io';
 
+import 'proxy_service.dart';
+import 'secure_dns_service.dart';
+
 import 'package:path_provider/path_provider.dart';
 
 class MediaDownloader {
@@ -112,6 +115,8 @@ class MediaDownloader {
     }
 
     final client = HttpClient()..userAgent = 'Linky Android';
+    ProxyService.applyToClient(client);
+    await SecureDnsService.instance.configure(client);
     IOSink? output;
     var current = uri;
     try {
@@ -153,3 +158,4 @@ class MediaDownloader {
     }
   }
 }
+
