@@ -902,6 +902,59 @@ def _destination_path(output_directory, output_name, extension):
     return destination
 
 
+class _ProgressReporter:
+    """Relays download progress to the Flutter UI through a Kotlin bridge."""
+
+    def __init__(self, task_id):
+        self.task_id = str(task_id or "")
+        self._bridge = None
+        self._last = -1
+        if not self.task_id:
+            return
+        try:
+            from java import jclass
+
+            self._bridge = jclass("com.example.linky.ExtractorProgress")
+        except Exception:
+            self._bridge = None
+
+    def report(self, fraction):
+        if self._bridge is None:
+            return
+        try:
+            fraction = max(0.0, min(1.0, float(fraction)))
+        except (TypeError, ValueError):
+            return
+        step = int(fraction * 100)
+        if step == self._last:
+            return
+        self._last = step
+        try:
+            self._bridge.report(self.task_id, step / 100.0)
+        except Exception:
+            pass
+
+    def hook(self, start, end):
+        def on_progress(status):
+            state = status.get("status")
+            if state == "finished":
+                self.report(end)
+                return
+            if state != "downloading":
+                return
+            downloaded = status.get("downloaded_bytes") or 0
+            total = (
+                status.get("total_bytes")
+                or status.get("total_bytes_estimate")
+                or 0
+            )
+            if not total:
+                return
+            self.report(start + (end - start) * (downloaded / total))
+
+        return on_progress
+
+
 def _ytdlp_options(cookie_path):
     options = {
         "quiet": True,
@@ -918,12 +971,23 @@ def _ytdlp_options(cookie_path):
     return options
 
 
-def _download_format(raw_url, format_id, temporary_directory, label, cookie_path):
+def _download_format(
+    raw_url,
+    format_id,
+    temporary_directory,
+    label,
+    cookie_path,
+    reporter=None,
+    start=0.0,
+    end=1.0,
+):
     options = _ytdlp_options(cookie_path)
     options["format"] = format_id
     options["outtmpl"] = os.path.join(
         temporary_directory, f"{label}-%(format_id)s.%(ext)s"
     )
+    if reporter is not None:
+        options["progress_hooks"] = [reporter.hook(start, end)]
     with YoutubeDL(options) as ydl:
         info = ydl.extract_info(raw_url, download=True)
         filename = ydl.prepare_filename(info)
@@ -932,11 +996,23 @@ def _download_format(raw_url, format_id, temporary_directory, label, cookie_path
     return filename
 
 
-def _download_direct(url, destination, headers):
+def _download_direct(url, destination, headers, reporter=None, start=0.0, end=1.0):
     request = urllib.request.Request(url, headers=headers)
     with urllib.request.urlopen(request, timeout=60) as response:
+        length = response.headers.get("Content-Length")
+        total = int(length) if length and length.isdigit() else 0
+        downloaded = 0
         with open(destination, "wb") as handle:
-            shutil.copyfileobj(response, handle, 1024 * 1024)
+            while True:
+                chunk = response.read(1024 * 512)
+                if not chunk:
+                    break
+                handle.write(chunk)
+                downloaded += len(chunk)
+                if reporter is not None and total > 0:
+                    reporter.report(
+                        start + (end - start) * (downloaded / total)
+                    )
     if not os.path.isfile(destination) or os.path.getsize(destination) <= 0:
         raise RuntimeError("The media stream could not be downloaded.")
     return destination
@@ -967,6 +1043,7 @@ def download(
     output_name="",
     video_mime_type="",
     audio_mime_type="",
+    task_id="",
 ):
     parsed = urlparse(raw_url)
     if parsed.scheme not in ("http", "https") or not parsed.hostname:
@@ -993,33 +1070,58 @@ def download(
 
     cookie_path = None if is_youtube else _write_cookie_file(cookie_text)
     temporary_directory = tempfile.mkdtemp(prefix="linky-download-", dir=output_directory)
+    reporter = _ProgressReporter(task_id)
+    video_end = 0.9
 
     try:
         if format_id.startswith("direct-") and video_url:
             video_path = _download_direct(
-                video_url, os.path.join(temporary_directory, "video.mp4"), request_headers
+                video_url,
+                os.path.join(temporary_directory, "video.mp4"),
+                request_headers,
+                reporter,
+                0.0,
+                video_end if audio_url else 0.98,
             )
             audio_path = (
                 _download_direct(
                     audio_url,
                     os.path.join(temporary_directory, "audio.m4a"),
                     request_headers,
+                    reporter,
+                    video_end,
+                    0.98,
                 )
                 if audio_url
                 else None
             )
         else:
             video_path = _download_format(
-                raw_url, format_id, temporary_directory, "video", cookie_path
+                raw_url,
+                format_id,
+                temporary_directory,
+                "video",
+                cookie_path,
+                reporter,
+                0.0,
+                video_end if audio_format_id else 0.98,
             )
             audio_path = (
                 _download_format(
-                    raw_url, audio_format_id, temporary_directory, "audio", cookie_path
+                    raw_url,
+                    audio_format_id,
+                    temporary_directory,
+                    "audio",
+                    cookie_path,
+                    reporter,
+                    video_end,
+                    0.98,
                 )
                 if audio_format_id
                 else None
             )
 
+        reporter.report(0.98)
         if audio_path:
             video_mime = (video_mime_type or "").lower()
             if "webm" in video_mime:
@@ -1042,6 +1144,7 @@ def download(
             extension = os.path.splitext(video_path)[1].lstrip(".") or "mp4"
             destination = _destination_path(output_directory, output_name, extension)
             os.replace(video_path, destination)
+        reporter.report(1.0)
         print(f"linky-ytdlp: downloaded {os.path.basename(destination)}", flush=True)
         return destination
     finally:

@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../../services/device_media_channel.dart';
+import '../../services/device_resources.dart';
 import '../../services/download_service.dart';
 import '../../services/media_downloader.dart';
 import '../../services/storage_service.dart';
@@ -18,18 +19,37 @@ class LibraryScreen extends StatefulWidget {
   State<LibraryScreen> createState() => _LibraryScreenState();
 }
 
+class _LibraryData {
+  const _LibraryData({
+    required this.files,
+    required this.totalBytes,
+    required this.bytesByType,
+    required this.sizeByPath,
+    required this.freeBytes,
+    required this.deviceBytes,
+  });
+
+  final List<File> files;
+  final int totalBytes;
+  final Map<String, int> bytesByType;
+  final Map<String, int> sizeByPath;
+  final int freeBytes;
+  final int deviceBytes;
+}
+
 class _LibraryScreenState extends State<LibraryScreen> {
   final _deviceMedia = DeviceMediaChannel();
   final _searchController = TextEditingController();
   final Set<String> _selectedPaths = {};
-  late Future<List<File>> _files;
+  late Future<_LibraryData> _data;
   bool _selecting = false;
+  String _filter = 'all';
   String _completedSignature = '';
 
   @override
   void initState() {
     super.initState();
-    _files = _loadFiles();
+    _data = _loadData();
     DownloadService.instance.addListener(_onDownloadsChanged);
     _searchController.addListener(() => setState(() {}));
   }
@@ -49,28 +69,49 @@ class _LibraryScreenState extends State<LibraryScreen> {
     if (!mounted || signature == _completedSignature) return;
     setState(() {
       _completedSignature = signature;
-      _files = _loadFiles();
+      _data = _loadData();
     });
   }
 
-  Future<List<File>> _loadFiles() async {
+  Future<_LibraryData> _loadData() async {
     final directory = await StorageService.instance.downloadDirectory();
-    if (!await directory.exists()) return [];
-    final files = await directory
-        .list(followLinks: false)
-        .where((entity) => entity is File)
-        .cast<File>()
-        .where((file) {
-          final name = file.uri.pathSegments.last;
-          return !name.startsWith('.') && !name.startsWith('linky_');
-        })
-        .toList();
+    final files = <File>[];
+    if (await directory.exists()) {
+      files.addAll(
+        await directory
+            .list(followLinks: false)
+            .where((entity) => entity is File)
+            .cast<File>()
+            .where((file) {
+              final name = file.uri.pathSegments.last;
+              return !name.startsWith('.') && !name.startsWith('linky_');
+            })
+            .toList(),
+      );
+    }
     final modified = <File, DateTime>{};
+    var total = 0;
+    final byType = <String, int>{};
+    final sizeByPath = <String, int>{};
     for (final file in files) {
-      modified[file] = (await file.stat()).modified;
+      final stat = await file.stat();
+      modified[file] = stat.modified;
+      final size = stat.size;
+      total += size;
+      sizeByPath[file.path] = size;
+      final type = _category(file.uri.pathSegments.last);
+      byType[type] = (byType[type] ?? 0) + size;
     }
     files.sort((a, b) => modified[b]!.compareTo(modified[a]!));
-    return files;
+    final info = await DeviceResources.instance.storageInfo();
+    return _LibraryData(
+      files: files,
+      totalBytes: total,
+      bytesByType: byType,
+      sizeByPath: sizeByPath,
+      freeBytes: info?.freeBytes ?? 0,
+      deviceBytes: info?.totalBytes ?? 0,
+    );
   }
 
   Future<void> _delete(File file) async {
@@ -79,7 +120,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
       if (!mounted) return;
       setState(() {
         _selectedPaths.remove(file.path);
-        _files = _loadFiles();
+        _data = _loadData();
       });
       _toast('File deleted');
     } on FileSystemException catch (error) {
@@ -151,7 +192,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
       if (!mounted) return;
       setState(() {
         _selectedPaths.remove(file.path);
-        _files = _loadFiles();
+        _data = _loadData();
       });
       _toast('File renamed');
     } on FileSystemException catch (error) {
@@ -198,7 +239,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
       }
       _selectedPaths.clear();
       _selecting = false;
-      _files = _loadFiles();
+      _data = _loadData();
     });
     _toast('Deleted ${selected.length} file(s)');
   }
@@ -241,15 +282,24 @@ class _LibraryScreenState extends State<LibraryScreen> {
     );
   }
 
-  bool _isImage(String name) => RegExp(
-        r'\.(jpe?g|png|gif|webp|avif|bmp)$',
-        caseSensitive: false,
-      ).hasMatch(name);
+  String _category(String name) {
+    final lower = name.toLowerCase();
+    if (RegExp(r'\.(jpe?g|png|gif|webp|avif|bmp|heic|heif)$').hasMatch(lower)) {
+      return 'image';
+    }
+    if (RegExp(r'\.(mp4|m4v|webm|mov|3gp|mkv|avi)$').hasMatch(lower)) {
+      return 'video';
+    }
+    if (RegExp(
+      r'\.(mp3|m4a|aac|ogg|oga|opus|wav|flac|weba)$',
+    ).hasMatch(lower)) {
+      return 'audio';
+    }
+    return 'document';
+  }
 
-  bool _isVideo(String name) => RegExp(
-        r'\.(mp4|m4v|webm|mov|3gp)$',
-        caseSensitive: false,
-      ).hasMatch(name);
+  bool _isImage(String name) => _category(name) == 'image';
+  bool _isVideo(String name) => _category(name) == 'video';
 
   String _formatBytes(int bytes) {
     if (bytes < 1024) return '$bytes B';
@@ -260,22 +310,52 @@ class _LibraryScreenState extends State<LibraryScreen> {
     return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(2)} GB';
   }
 
+  void _toggleSelect(File file) {
+    setState(() {
+      _selecting = true;
+      if (_selectedPaths.contains(file.path)) {
+        _selectedPaths.remove(file.path);
+        if (_selectedPaths.isEmpty) _selecting = false;
+      } else {
+        _selectedPaths.add(file.path);
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final palette = context.palette;
     return Scaffold(
       body: SafeArea(
         bottom: false,
-        child: FutureBuilder<List<File>>(
-          future: _files,
+        child: FutureBuilder<_LibraryData>(
+          future: _data,
           builder: (context, snapshot) {
             final loading = snapshot.connectionState != ConnectionState.done;
+            final data = snapshot.data ??
+                const _LibraryData(
+                  files: [],
+                  totalBytes: 0,
+                  bytesByType: {},
+                  sizeByPath: {},
+                  freeBytes: 0,
+                  deviceBytes: 0,
+                );
             final query = _searchController.text.trim().toLowerCase();
-            final files = (snapshot.data ?? const <File>[])
-                .where((file) =>
-                    query.isEmpty ||
-                    file.uri.pathSegments.last.toLowerCase().contains(query))
+            final files = data.files
+                .where((file) {
+                  final name = file.uri.pathSegments.last.toLowerCase();
+                  if (query.isNotEmpty && !name.contains(query)) return false;
+                  if (_filter != 'all' && _category(name) != _filter) {
+                    return false;
+                  }
+                  return true;
+                })
                 .toList(growable: false);
+            final selectedBytes = _selectedPaths.fold<int>(
+              0,
+              (sum, path) => sum + (data.sizeByPath[path] ?? 0),
+            );
             return Stack(
               children: [
                 ListView(
@@ -319,7 +399,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
                         ),
                       ],
                     ),
-                    const SizedBox(height: 18),
+                    const SizedBox(height: 16),
+                    _StorageCard(data: data),
+                    const SizedBox(height: 14),
                     TextField(
                       controller: _searchController,
                       textInputAction: TextInputAction.search,
@@ -332,7 +414,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
                         ),
                       ),
                     ),
-                    const SizedBox(height: 18),
+                    const SizedBox(height: 14),
+                    _FilterPills(
+                      data: data,
+                      value: _filter,
+                      onChanged: (value) => setState(() => _filter = value),
+                    ),
+                    const SizedBox(height: 14),
                     if (loading)
                       const Padding(
                         padding: EdgeInsets.symmetric(vertical: 48),
@@ -358,11 +446,15 @@ class _LibraryScreenState extends State<LibraryScreen> {
                     bottom: 16,
                     child: _SelectionBar(
                       count: _selectedPaths.length,
+                      sizeLabel: selectedBytes > 0
+                          ? _formatBytes(selectedBytes)
+                          : null,
                       onSave: _selectedPaths.isEmpty
                           ? null
                           : _saveSelectedToGallery,
-                      onDelete:
-                          _selectedPaths.isEmpty ? null : _deleteSelected,
+                      onDelete: _selectedPaths.isEmpty
+                          ? null
+                          : _deleteSelected,
                     ),
                   ),
               ],
@@ -379,7 +471,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
           icon: searching ? Icons.search_off_rounded : Icons.folder_open_rounded,
           title: searching ? 'No matches' : 'Nothing saved yet',
           message: searching
-              ? 'Try a different file name.'
+              ? 'Try a different file name or filter.'
               : 'Media you download will live here and stay available offline.',
         ),
       );
@@ -394,14 +486,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
       padding: const EdgeInsets.only(bottom: 10),
       child: AppCard(
         padding: const EdgeInsets.all(12),
+        color: selected ? palette.accent : null,
         onTap: _selecting
-            ? () => setState(() {
-                  if (selected) {
-                    _selectedPaths.remove(file.path);
-                  } else {
-                    _selectedPaths.add(file.path);
-                  }
-                })
+            ? () => _toggleSelect(file)
             : isImage
                 ? () => _previewImage(file)
                 : isVideo
@@ -411,13 +498,34 @@ class _LibraryScreenState extends State<LibraryScreen> {
                           ),
                         )
                     : null,
-        color: selected ? palette.accent : null,
         child: Row(
           children: [
+            GestureDetector(
+              onTap: () => _toggleSelect(file),
+              behavior: HitTestBehavior.opaque,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 150),
+                width: 22,
+                height: 22,
+                margin: const EdgeInsets.only(right: 10),
+                decoration: BoxDecoration(
+                  color: selected ? AppColors.primary : Colors.transparent,
+                  borderRadius: BorderRadius.circular(7),
+                  border: Border.all(
+                    color: selected ? AppColors.primary : palette.border,
+                    width: 1.6,
+                  ),
+                ),
+                child: selected
+                    ? const Icon(Icons.check_rounded,
+                        size: 14, color: Colors.white)
+                    : null,
+              ),
+            ),
             MediaThumbnail(
               type: isImage ? 'image' : isVideo ? 'video' : 'document',
               file: isImage || isVideo ? file : null,
-              size: 56,
+              size: 52,
               fallback: Icon(
                 isVideo
                     ? Icons.movie_outlined
@@ -436,7 +544,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                     name,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: AppText.body(14, weight: FontWeight.w700),
+                    style: AppText.body(13, weight: FontWeight.w700),
                   ),
                   const SizedBox(height: 3),
                   FutureBuilder<FileStat>(
@@ -445,25 +553,14 @@ class _LibraryScreenState extends State<LibraryScreen> {
                       stat.hasData
                           ? '${_formatBytes(stat.data!.size)} · ${isVideo ? 'Video' : isImage ? 'Image' : 'File'}'
                           : 'Saved on this device',
-                      style: AppText.body(12,
+                      style: AppText.body(11,
                           color: palette.mutedForeground),
                     ),
                   ),
                 ],
               ),
             ),
-            if (_selecting)
-              Checkbox(
-                value: selected,
-                onChanged: (_) => setState(() {
-                  if (selected) {
-                    _selectedPaths.remove(file.path);
-                  } else {
-                    _selectedPaths.add(file.path);
-                  }
-                }),
-              )
-            else
+            if (!_selecting)
               PopupMenuButton<String>(
                 icon: Icon(Icons.more_horiz_rounded,
                     color: palette.mutedForeground),
@@ -487,14 +584,218 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }
 }
 
+class _StorageCard extends StatelessWidget {
+  const _StorageCard({required this.data});
+
+  final _LibraryData data;
+
+  String _fmt(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    if (bytes < 1024 * 1024 * 1024) {
+      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    }
+    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(2)} GB';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.palette;
+    final total = data.totalBytes;
+    final hasDevice = data.deviceBytes > 0;
+    final segments = <(String, int, Color)>[
+      ('video', data.bytesByType['video'] ?? 0, AppColors.primary),
+      ('audio', data.bytesByType['audio'] ?? 0, AppColors.forestAccent),
+      ('image', data.bytesByType['image'] ?? 0, const Color(0xFFA7D6C0)),
+      ('document', data.bytesByType['document'] ?? 0, AppColors.amber),
+    ];
+    return AppCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.sd_storage_outlined,
+                  size: 18, color: palette.accentForeground),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text('Local storage',
+                    style:
+                        AppText.body(13, weight: FontWeight.w700)),
+              ),
+              Text(
+                hasDevice
+                    ? '${_fmt(total)} of ${_fmt(data.deviceBytes)}'
+                    : '${_fmt(total)} saved',
+                style: AppText.body(11,
+                    color: palette.mutedForeground),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(AppRadius.pill),
+            child: SizedBox(
+              height: 10,
+              child: total <= 0
+                  ? ColoredBox(color: palette.secondary)
+                  : Row(
+                      children: [
+                        for (final segment in segments)
+                          if (segment.$2 > 0)
+                            Expanded(
+                              flex: segment.$2,
+                              child: ColoredBox(color: segment.$3),
+                            ),
+                      ],
+                    ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  '${data.files.length} file${data.files.length == 1 ? '' : 's'} · ${_fmt(total)} used',
+                  style: AppText.body(11,
+                      color: palette.mutedForeground),
+                ),
+              ),
+              if (hasDevice)
+                Text(
+                  '${_fmt(data.freeBytes)} free',
+                  style: AppText.body(11,
+                      weight: FontWeight.w700,
+                      color: palette.accentForeground),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _FilterPills extends StatelessWidget {
+  const _FilterPills({
+    required this.data,
+    required this.value,
+    required this.onChanged,
+  });
+
+  final _LibraryData data;
+  final String value;
+  final ValueChanged<String> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.palette;
+    final counts = <String, int>{
+      'video': 0,
+      'audio': 0,
+      'image': 0,
+      'document': 0,
+    };
+    for (final file in data.files) {
+      final type = _typeOf(file.uri.pathSegments.last);
+      counts[type] = (counts[type] ?? 0) + 1;
+    }
+    final options = <(String, String, int)>[
+      ('all', 'All', data.files.length),
+      ('video', 'Videos', counts['video'] ?? 0),
+      ('audio', 'Audio', counts['audio'] ?? 0),
+      ('image', 'Images', counts['image'] ?? 0),
+      ('document', 'Docs', counts['document'] ?? 0),
+    ];
+    return SizedBox(
+      height: 36,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: options.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (context, index) {
+          final option = options[index];
+          final selected = value == option.$1;
+          return GestureDetector(
+            onTap: () => onChanged(option.$1),
+            child: Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+              decoration: BoxDecoration(
+                color: selected ? AppColors.primary : palette.card,
+                borderRadius: BorderRadius.circular(AppRadius.pill),
+                border: Border.all(
+                  color: selected ? AppColors.primary : palette.border,
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    option.$2,
+                    style: AppText.body(12,
+                        weight:
+                            selected ? FontWeight.w700 : FontWeight.w600,
+                        color: selected
+                            ? Colors.white
+                            : palette.foreground),
+                  ),
+                  const SizedBox(width: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 6, vertical: 1),
+                    decoration: BoxDecoration(
+                      color: selected
+                          ? Colors.white.withValues(alpha: 0.22)
+                          : palette.accent,
+                      borderRadius:
+                          BorderRadius.circular(AppRadius.pill),
+                    ),
+                    child: Text(
+                      '${option.$3}',
+                      style: AppText.body(10,
+                          weight: FontWeight.w700,
+                          color: selected
+                              ? Colors.white
+                              : palette.accentForeground),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  String _typeOf(String name) {
+    final lower = name.toLowerCase();
+    if (RegExp(r'\.(jpe?g|png|gif|webp|avif|bmp|heic|heif)$').hasMatch(lower)) {
+      return 'image';
+    }
+    if (RegExp(r'\.(mp4|m4v|webm|mov|3gp|mkv|avi)$').hasMatch(lower)) {
+      return 'video';
+    }
+    if (RegExp(
+      r'\.(mp3|m4a|aac|ogg|oga|opus|wav|flac|weba)$',
+    ).hasMatch(lower)) {
+      return 'audio';
+    }
+    return 'document';
+  }
+}
+
 class _SelectionBar extends StatelessWidget {
   const _SelectionBar({
     required this.count,
+    required this.sizeLabel,
     required this.onSave,
     required this.onDelete,
   });
 
   final int count;
+  final String? sizeLabel;
   final VoidCallback? onSave;
   final VoidCallback? onDelete;
 
@@ -510,16 +811,28 @@ class _SelectionBar extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
+          Container(
+            width: 28,
+            height: 28,
+            margin: const EdgeInsets.only(left: 4),
+            alignment: Alignment.center,
+            decoration: const BoxDecoration(
+              color: AppColors.primary,
+              shape: BoxShape.circle,
+            ),
+            child: Text('$count',
+                style: AppText.body(11,
+                    weight: FontWeight.w800, color: Colors.white)),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
             child: Text(
-              '$count selected',
-              style: AppText.body(13,
-                  weight: FontWeight.w600,
-                  color: palette.mutedForeground),
+              sizeLabel != null ? '$count selected ($sizeLabel)' : '$count selected',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: AppText.body(12, weight: FontWeight.w700),
             ),
           ),
-          const Spacer(),
           RoundIconButton(
             icon: Icons.delete_outline_rounded,
             tooltip: 'Delete selected',
@@ -527,10 +840,9 @@ class _SelectionBar extends StatelessWidget {
             onPressed: onDelete,
           ),
           const SizedBox(width: 8),
-          FilledButton.icon(
+          FilledButton(
             onPressed: onSave,
-            icon: const Icon(Icons.save_alt_rounded, size: 18),
-            label: const Text('Save'),
+            child: const Text('Save to Gallery'),
           ),
         ],
       ),

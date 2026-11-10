@@ -1136,6 +1136,16 @@ class DownloadService extends ChangeNotifier {
         audioMimeType: current.audioMimeType,
         outputName: current.filename,
         headers: current.requestHeaders,
+        taskId: current.taskId,
+        onProgress: (progress) {
+          final latest = _records[record.taskId];
+          if (latest == null || latest.state.isFinal) return;
+          _records[record.taskId] = latest.copyWith(
+            state: DownloadState.running,
+            progress: progress.clamp(0.0, 1.0).toDouble(),
+          );
+          _notify();
+        },
       );
       if (_records[record.taskId]?.state == DownloadState.canceled) return;
       final post = await _postProcess(current, file, null);

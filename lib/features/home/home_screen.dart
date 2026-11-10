@@ -133,6 +133,15 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  void _clearResults() {
+    setState(() {
+      _media = [];
+      _selectedGroups.clear();
+      _chosenQuality.clear();
+      _error = null;
+    });
+  }
+
   Future<void> _pasteFromClipboard() async {
     final data = await Clipboard.getData(Clipboard.kTextPlain);
     final text = data?.text?.trim();
@@ -415,6 +424,50 @@ class _HomeScreenState extends State<HomeScreen> {
               padding: EdgeInsets.fromLTRB(20, 16, 20, showActionBar ? 120 : 32),
               children: [
                 Row(
+                  children: [
+                    Container(
+                      width: 32,
+                      height: 32,
+                      decoration: const BoxDecoration(
+                        color: AppColors.primary,
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.link_rounded,
+                          size: 18, color: Colors.white),
+                    ),
+                    const SizedBox(width: 8),
+                    Text('Linky',
+                        style: AppText.heading(20,
+                            weight: FontWeight.w800)),
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: palette.accent,
+                        borderRadius:
+                            BorderRadius.circular(AppRadius.pill),
+                      ),
+                      child: Text('Home',
+                          style: AppText.body(11,
+                              weight: FontWeight.w700,
+                              color: palette.accentForeground)),
+                    ),
+                    const Spacer(),
+                    RoundIconButton(
+                      icon: Icons.bookmark_border_rounded,
+                      tooltip: 'Bookmarks',
+                      size: 40,
+                      onPressed: () => Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => const BookmarksScreen(),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 18),
+                Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Expanded(
@@ -539,6 +592,8 @@ class _HomeScreenState extends State<HomeScreen> {
                       icon: Icons.check_circle_rounded,
                       message:
                           'Link detected · ${groups.length} media item${groups.length == 1 ? '' : 's'}',
+                      actionLabel: 'CLEAR',
+                      onAction: _clearResults,
                     ),
                   ),
                 if (_error != null)
@@ -580,7 +635,6 @@ class _HomeScreenState extends State<HomeScreen> {
                         icon: Icons.history_rounded,
                         label: 'History',
                         caption: '${HistoryService.instance.entries.length} visits',
-                        muted: true,
                         onTap: () => Navigator.of(context).push(
                           MaterialPageRoute<void>(
                             builder: (_) => const HistoryScreen(),
@@ -595,7 +649,6 @@ class _HomeScreenState extends State<HomeScreen> {
                         label: 'Bookmarks',
                         caption:
                             '${BookmarksService.instance.entries.length} saved',
-                        muted: true,
                         onTap: () => Navigator.of(context).push(
                           MaterialPageRoute<void>(
                             builder: (_) => const BookmarksScreen(),
@@ -611,9 +664,29 @@ class _HomeScreenState extends State<HomeScreen> {
                   Row(
                     children: [
                       Expanded(
-                        child: Text('Detected media',
-                            style: AppText.heading(20,
-                                color: palette.foreground)),
+                        child: Row(
+                          children: [
+                            Text('Detected media',
+                                style: AppText.heading(20,
+                                    color: palette.foreground)),
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: palette.accent,
+                                borderRadius:
+                                    BorderRadius.circular(AppRadius.pill),
+                              ),
+                              child: Text(
+                                '${groups.length}',
+                                style: AppText.body(11,
+                                    weight: FontWeight.w700,
+                                    color: palette.accentForeground),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                       TextButton(
                         onPressed: () => setState(() {
@@ -1001,39 +1074,45 @@ class _QuickAction extends StatelessWidget {
     required this.label,
     required this.caption,
     required this.onTap,
-    this.muted = false,
   });
 
   final IconData icon;
   final String label;
   final String caption;
   final VoidCallback? onTap;
-  final bool muted;
 
   @override
   Widget build(BuildContext context) {
     final palette = context.palette;
-    final tileColor = muted ? palette.secondary : palette.accent;
-    final iconColor = muted ? palette.foreground : palette.accentForeground;
     return AppCard(
       onTap: onTap,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
         children: [
           Container(
             width: 40,
             height: 40,
             decoration: BoxDecoration(
-              color: tileColor,
+              color: palette.accent,
               borderRadius: BorderRadius.circular(12),
             ),
-            child: Icon(icon, size: 20, color: iconColor),
+            child: Icon(icon, size: 20, color: palette.accentForeground),
           ),
-          const SizedBox(height: 12),
-          Text(label, style: AppText.heading(15, weight: FontWeight.w600)),
-          const SizedBox(height: 2),
-          Text(caption,
-              style: AppText.body(11, color: palette.mutedForeground)),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label,
+                    style: AppText.heading(15, weight: FontWeight.w700)),
+                const SizedBox(height: 1),
+                Text(caption,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppText.body(11,
+                        color: palette.mutedForeground)),
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -1045,11 +1124,15 @@ class _StatusPill extends StatelessWidget {
     required this.color,
     required this.icon,
     required this.message,
+    this.actionLabel,
+    this.onAction,
   });
 
   final Color color;
   final IconData icon;
   final String message;
+  final String? actionLabel;
+  final VoidCallback? onAction;
 
   @override
   Widget build(BuildContext context) {
@@ -1081,6 +1164,18 @@ class _StatusPill extends StatelessWidget {
               style: AppText.body(12, weight: FontWeight.w600),
             ),
           ),
+          if (actionLabel != null)
+            GestureDetector(
+              onTap: onAction,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 6),
+                child: Text(
+                  actionLabel!,
+                  style: AppText.label(10,
+                      color: palette.mutedForeground),
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -1155,26 +1250,35 @@ class _DownloadBar extends StatelessWidget {
           Expanded(
             child: Padding(
               padding: const EdgeInsets.only(left: 12),
-              child: Text(
-                '$count selected${sizeLabel != null ? ' · $sizeLabel' : ''}',
-                style: AppText.body(13,
-                    weight: FontWeight.w600,
-                    color: palette.mutedForeground),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    '$count selected${sizeLabel != null ? ' · $sizeLabel' : ''}',
+                    style: AppText.body(13, weight: FontWeight.w700),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 1),
+                  Text('Ready to queue',
+                      style: AppText.body(10,
+                          color: palette.mutedForeground)),
+                ],
               ),
             ),
           ),
-          FilledButton(
+          FilledButton.icon(
             onPressed: onDownload,
-            child: busy
+            icon: busy
                 ? const SizedBox(
                     width: 16,
                     height: 16,
                     child: CircularProgressIndicator(
                         strokeWidth: 2, color: Colors.white),
                   )
-                : const Text('Download selected'),
+                : const Icon(Icons.download_rounded, size: 18),
+            label: const Text('Download'),
           ),
         ],
       ),

@@ -2,11 +2,18 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 class AppColors {
-  static const primary = Color(0xFF6C3BF4);
+  static const primary = Color(0xFF1E7A5D);
+  static const primaryDeep = Color(0xFF145C46);
   static const teal = Color(0xFF14B8A6);
   static const amber = Color(0xFFF59E0B);
   static const red = Color(0xFFE5484D);
   static const white = Color(0xFFFFFFFF);
+  static const forest = Color(0xFF061B14);
+  static const forestSurface = Color(0xFF0E2A20);
+  static const forestBorder = Color(0xFF143B2E);
+  static const forestText = Color(0xFFE7FFF2);
+  static const forestMuted = Color(0xFFA7D6C0);
+  static const forestAccent = Color(0xFF61B795);
 }
 
 class AppPalette {
@@ -41,35 +48,35 @@ class AppPalette {
   final Color destructive;
 
   static const light = AppPalette(
-    background: Color(0xFFF6F7FA),
-    foreground: Color(0xFF13151C),
+    background: Color(0xFFE7FFF2),
+    foreground: Color(0xFF0B3D2E),
     card: Color(0xFFFFFFFF),
-    cardForeground: Color(0xFF13151C),
-    secondary: Color(0xFFEBEDF3),
-    secondaryForeground: Color(0xFF1D2030),
-    muted: Color(0xFFEFF1F6),
-    mutedForeground: Color(0xFF6A7080),
-    accent: Color(0xFFEEE9FF),
-    accentForeground: Color(0xFF4B22C4),
-    border: Color(0xFFE2E5ED),
-    input: Color(0xFFEFF1F6),
+    cardForeground: Color(0xFF0B3D2E),
+    secondary: Color(0xFFEAF6F0),
+    secondaryForeground: Color(0xFF0B3D2E),
+    muted: Color(0xFFEAF6F0),
+    mutedForeground: Color(0xFF4A6B5D),
+    accent: Color(0xFFCDFFE8),
+    accentForeground: Color(0xFF1E7A5D),
+    border: Color(0xFFB4E5CF),
+    input: Color(0xFFEAF6F0),
     destructive: Color(0xFFE5484D),
   );
 
   static const dark = AppPalette(
-    background: Color(0xFF0F1117),
-    foreground: Color(0xFFF2F4F8),
-    card: Color(0xFF171A22),
-    cardForeground: Color(0xFFF2F4F8),
-    secondary: Color(0xFF1F232D),
-    secondaryForeground: Color(0xFFE7EAF1),
-    muted: Color(0xFF1C2029),
-    mutedForeground: Color(0xFF9AA1B2),
-    accent: Color(0xFF241C3D),
-    accentForeground: Color(0xFFC9B8FF),
-    border: Color(0xFF272C38),
-    input: Color(0xFF1C2029),
-    destructive: Color(0xFFFF6B6F),
+    background: Color(0xFF061B14),
+    foreground: Color(0xFFE7FFF2),
+    card: Color(0xFF0E2A20),
+    cardForeground: Color(0xFFE7FFF2),
+    secondary: Color(0xFF143B2E),
+    secondaryForeground: Color(0xFFE7FFF2),
+    muted: Color(0xFF0E2A20),
+    mutedForeground: Color(0xFFA7D6C0),
+    accent: Color(0xFF143B2E),
+    accentForeground: Color(0xFF61B795),
+    border: Color(0xFF143B2E),
+    input: Color(0xFF0E2A20),
+    destructive: Color(0xFFFF8A8E),
   );
 }
 

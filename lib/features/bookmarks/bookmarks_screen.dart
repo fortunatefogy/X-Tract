@@ -70,6 +70,13 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    RoundIconButton(
+                      icon: Icons.arrow_back_rounded,
+                      tooltip: 'Back',
+                      size: 40,
+                      onPressed: () => Navigator.of(context).maybePop(),
+                    ),
+                    const SizedBox(width: 12),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,

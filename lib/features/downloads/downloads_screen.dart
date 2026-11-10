@@ -178,9 +178,18 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
             Row(
               children: [
                 Expanded(
-                  child: Text('Downloads',
-                      style: AppText.display(30,
-                          color: palette.foreground)),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Downloads',
+                          style: AppText.display(30,
+                              color: palette.foreground)),
+                      const SizedBox(height: 2),
+                      Text('Real-time media engine active',
+                          style: AppText.body(12,
+                              color: palette.mutedForeground)),
+                    ],
+                  ),
                 ),
                 PopupMenuButton<String>(
                   tooltip: 'Queue tools',
@@ -256,8 +265,9 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
               children: [
                 Expanded(
                   child: StatTile(
-                    label: 'Overall',
+                    label: 'Progress',
                     value: '${(overall * 100).clamp(0, 100).round()}%',
+                    icon: Icons.trending_up_rounded,
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -265,6 +275,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                   child: StatTile(
                     label: 'Speed',
                     value: speed > 0 ? _formatSpeed(speed) : '—',
+                    icon: Icons.bolt_rounded,
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -276,6 +287,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                         : remaining.inMinutes > 0
                             ? '${remaining.inMinutes} min'
                             : '${remaining.inSeconds}s',
+                    icon: Icons.timer_outlined,
                   ),
                 ),
               ],
@@ -428,39 +440,53 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
           children: [
             Row(
               children: [
-                SizedBox(
-                  width: 52,
-                  height: 52,
-                  child: Stack(
-                    alignment: Alignment.center,
-                    children: [
-                      SizedBox(
-                        width: 52,
-                        height: 52,
-                        child: CircularProgressIndicator(
-                          value: record.progress > 0 ? record.progress : null,
-                          strokeWidth: 5,
-                          strokeCap: StrokeCap.round,
-                          backgroundColor: palette.muted,
-                          color: ringColor,
-                        ),
-                      ),
-                      Text('$percent%',
-                          style: AppText.body(11,
-                              weight: FontWeight.w800)),
-                    ],
+                Container(
+                  width: 48,
+                  height: 48,
+                  decoration: BoxDecoration(
+                    color: palette.accent,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(
+                    record.type == 'audio'
+                        ? Icons.music_note_rounded
+                        : record.type == 'image'
+                            ? Icons.image_outlined
+                            : Icons.play_circle_fill_rounded,
+                    color: palette.accentForeground,
+                    size: 24,
                   ),
                 ),
-                const SizedBox(width: 14),
+                const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(record.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style:
-                              AppText.body(14, weight: FontWeight.w700)),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(record.title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: AppText.body(14,
+                                    weight: FontWeight.w700)),
+                          ),
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: palette.accent,
+                              borderRadius:
+                                  BorderRadius.circular(AppRadius.pill),
+                            ),
+                            child: Text('$percent%',
+                                style: AppText.body(10,
+                                    weight: FontWeight.w700,
+                                    color: palette.accentForeground)),
+                          ),
+                        ],
+                      ),
                       const SizedBox(height: 3),
                       Text(
                         _transferSubtitle(record, sizeDetail, speedLabel),

@@ -7,6 +7,8 @@ import android.content.ContentValues
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.StatFs
 import android.provider.MediaStore
 import android.webkit.MimeTypeMap
@@ -21,6 +23,24 @@ import java.util.concurrent.Executors
 import javax.crypto.Cipher
 import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
+
+object ExtractorProgress {
+    @Volatile
+    var channel: MethodChannel? = null
+
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    @JvmStatic
+    fun report(taskId: String, progress: Double) {
+        val current = channel ?: return
+        mainHandler.post {
+            current.invokeMethod(
+                "extractorProgress",
+                mapOf("taskId" to taskId, "progress" to progress),
+            )
+        }
+    }
+}
 
 class MainActivity : FlutterActivity() {
     private var pendingSharedText: String? = null
@@ -295,7 +315,10 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "linky/extractor")
+        val extractorChannel =
+            MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "linky/extractor")
+        ExtractorProgress.channel = extractorChannel
+        extractorChannel
             .setMethodCallHandler { call, result ->
                 if (call.method != "extractWithYtDlp" &&
                     call.method != "downloadWithYtDlp") {
@@ -317,6 +340,7 @@ class MainActivity : FlutterActivity() {
                 val outputName = call.argument<String>("outputName") ?: ""
                 val videoMimeType = call.argument<String>("videoMimeType") ?: ""
                 val audioMimeType = call.argument<String>("audioMimeType") ?: ""
+                val taskId = call.argument<String>("taskId") ?: ""
                 if (call.method == "downloadWithYtDlp" &&
                     (formatId.isNullOrBlank() || outputDirectory.isNullOrBlank())) {
                     result.error("invalid_download", "The selected media format or download folder is missing.", null)
@@ -342,6 +366,7 @@ class MainActivity : FlutterActivity() {
                                 outputName,
                                 videoMimeType,
                                 audioMimeType,
+                                taskId,
                             ).toString()
                         } else {
                             module.callAttr("extract", url, cookieText).toString()

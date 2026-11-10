@@ -3020,19 +3020,25 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
         _handleBack();
       },
       child: Scaffold(
+        backgroundColor: AppColors.forest,
         appBar: AppBar(
           toolbarHeight: 60,
+          backgroundColor: AppColors.forest,
+          foregroundColor: AppColors.forestText,
+          surfaceTintColor: Colors.transparent,
           leadingWidth: 100,
           leading: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               IconButton(
                 tooltip: 'Back',
+                color: AppColors.forestText,
                 onPressed: _handleBack,
                 icon: const Icon(Icons.arrow_back_rounded),
               ),
               IconButton(
                 tooltip: 'Forward',
+                color: AppColors.forestMuted,
                 onPressed: _tab.canGoForward
                     ? () async {
                         await _webController?.goForward();
@@ -3048,12 +3054,14 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
             height: 44,
             padding: const EdgeInsets.symmetric(horizontal: 12),
             decoration: BoxDecoration(
-              color: context.palette.input,
+              color: AppColors.forestSurface,
               borderRadius: BorderRadius.circular(AppRadius.pill),
+              border: Border.all(color: AppColors.forestBorder),
             ),
             child: Row(
               children: [
-                const Icon(Icons.lock_rounded, size: 15, color: AppColors.teal),
+                const Icon(Icons.lock_rounded,
+                    size: 15, color: AppColors.forestAccent),
                 const SizedBox(width: 8),
                 Expanded(
                   child: TextField(
@@ -3063,11 +3071,14 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
                     textInputAction: TextInputAction.go,
                     onChanged: (_) => _updateSuggestions(),
                     onSubmitted: (_) => _navigate(),
-                    style: AppText.body(13),
-                    decoration: const InputDecoration(
+                    style: AppText.body(13, color: AppColors.forestText),
+                    cursorColor: AppColors.forestAccent,
+                    decoration: InputDecoration(
                       isDense: true,
                       filled: false,
                       hintText: 'Search or enter address',
+                      hintStyle: AppText.body(13,
+                          color: AppColors.forestMuted),
                       border: InputBorder.none,
                       enabledBorder: InputBorder.none,
                       focusedBorder: InputBorder.none,
@@ -3076,10 +3087,10 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
                 ),
                 GestureDetector(
                   onTap: () => _webController?.reload(),
-                  child: Icon(
+                  child: const Icon(
                     Icons.refresh_rounded,
                     size: 17,
-                    color: context.palette.mutedForeground,
+                    color: AppColors.forestMuted,
                   ),
                 ),
               ],
@@ -3091,6 +3102,9 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
               child: RoundIconButton(
                 icon: Icons.tab_rounded,
                 tooltip: 'Tabs and options',
+                background: AppColors.forestSurface,
+                borderColor: AppColors.forestBorder,
+                color: AppColors.forestAccent,
                 badge: _tabs.length > 1 ? '${_tabs.length}' : null,
                 onPressed: _showTabsSheet,
               ),

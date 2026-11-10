@@ -76,6 +76,8 @@ class RoundIconButton extends StatelessWidget {
     this.iconSize = 20,
     this.filled = false,
     this.badge,
+    this.background,
+    this.borderColor,
   });
 
   final IconData icon;
@@ -86,20 +88,25 @@ class RoundIconButton extends StatelessWidget {
   final double iconSize;
   final bool filled;
   final String? badge;
+  final Color? background;
+  final Color? borderColor;
 
   @override
   Widget build(BuildContext context) {
     final palette = context.palette;
-    final background = filled ? AppColors.primary : palette.card;
+    final fill = background ?? (filled ? AppColors.primary : palette.card);
     final foreground =
         color ?? (filled ? AppColors.white : palette.foreground);
     final button = SizedBox(
       width: size,
       height: size,
       child: Material(
-        color: background,
+        color: fill,
         shape: CircleBorder(
-          side: filled ? BorderSide.none : BorderSide(color: palette.border),
+          side: BorderSide(
+            color: borderColor ??
+                (filled ? Colors.transparent : palette.border),
+          ),
         ),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
@@ -248,10 +255,16 @@ class _PillButton extends StatelessWidget {
 }
 
 class StatTile extends StatelessWidget {
-  const StatTile({super.key, required this.label, required this.value});
+  const StatTile({
+    super.key,
+    required this.label,
+    required this.value,
+    this.icon,
+  });
 
   final String label;
   final String value;
+  final IconData? icon;
 
   @override
   Widget build(BuildContext context) {
@@ -259,11 +272,33 @@ class StatTile extends StatelessWidget {
     return AppCard(
       padding: const EdgeInsets.all(12),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Text(label, style: AppText.body(11, color: palette.mutedForeground)),
-          const SizedBox(height: 6),
-          Text(value, style: AppText.heading(20, weight: FontWeight.w700)),
+          if (icon != null) ...[
+            Container(
+              width: 30,
+              height: 30,
+              decoration: BoxDecoration(
+                color: palette.accent,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, size: 16, color: palette.accentForeground),
+            ),
+            const SizedBox(height: 6),
+          ],
+          Text(
+            value,
+            textAlign: TextAlign.center,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: AppText.heading(18, weight: FontWeight.w700),
+          ),
+          const SizedBox(height: 1),
+          Text(
+            label,
+            textAlign: TextAlign.center,
+            style: AppText.body(10, color: palette.mutedForeground),
+          ),
         ],
       ),
     );

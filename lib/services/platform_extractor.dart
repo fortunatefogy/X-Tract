@@ -9,6 +9,26 @@ import '../models/media_item.dart';
 /// Calls the yt-dlp engine packaged inside Linky's Android application.
 class PlatformExtractor {
   static const _channel = MethodChannel('linky/extractor');
+  static final _progressListeners = <String, void Function(double)>{};
+  static bool _progressHandlerInstalled = false;
+
+  static void _ensureProgressHandler() {
+    if (_progressHandlerInstalled) return;
+    _progressHandlerInstalled = true;
+    _channel.setMethodCallHandler((call) async {
+      if (call.method != 'extractorProgress') return null;
+      final args = call.arguments;
+      if (args is Map) {
+        final taskId = args['taskId']?.toString() ?? '';
+        final listener = _progressListeners[taskId];
+        if (listener != null) {
+          final progress = (args['progress'] as num?)?.toDouble() ?? 0;
+          listener(progress.clamp(0.0, 1.0).toDouble());
+        }
+      }
+      return null;
+    });
+  }
 
   Future<String> cookieTextFor(String pageUrl,
       {InAppWebViewController? webViewController}) async {
@@ -86,27 +106,39 @@ class PlatformExtractor {
     String? audioMimeType,
     String? outputName,
     Map<String, String> headers = const {},
+    String taskId = '',
+    void Function(double progress)? onProgress,
   }) async {
-    final path = await _channel.invokeMethod<String>(
-      'downloadWithYtDlp',
-      {
-        'url': pageUrl,
-        'formatId': formatId,
-        'outputDirectory': outputDirectory.path,
-        'cookieText': cookieText,
-        'audioFormatId': audioFormatId ?? '',
-        'videoUrl': videoUrl ?? '',
-        'audioUrl': audioUrl ?? '',
-        'headers': jsonEncode(headers),
-        'outputName': outputName ?? '',
-        'videoMimeType': videoMimeType ?? '',
-        'audioMimeType': audioMimeType ?? '',
-      },
-    ).timeout(const Duration(minutes: 10));
-    if (path == null || path.isEmpty) {
-      throw const FileSystemException(
-          'yt-dlp did not return a saved file path.');
+    final trackProgress = taskId.isNotEmpty && onProgress != null;
+    if (trackProgress) {
+      _ensureProgressHandler();
+      _progressListeners[taskId] = onProgress;
     }
-    return File(path);
+    try {
+      final path = await _channel.invokeMethod<String>(
+        'downloadWithYtDlp',
+        {
+          'url': pageUrl,
+          'formatId': formatId,
+          'outputDirectory': outputDirectory.path,
+          'cookieText': cookieText,
+          'audioFormatId': audioFormatId ?? '',
+          'videoUrl': videoUrl ?? '',
+          'audioUrl': audioUrl ?? '',
+          'headers': jsonEncode(headers),
+          'outputName': outputName ?? '',
+          'videoMimeType': videoMimeType ?? '',
+          'audioMimeType': audioMimeType ?? '',
+          'taskId': taskId,
+        },
+      ).timeout(const Duration(minutes: 10));
+      if (path == null || path.isEmpty) {
+        throw const FileSystemException(
+            'yt-dlp did not return a saved file path.');
+      }
+      return File(path);
+    } finally {
+      if (trackProgress) _progressListeners.remove(taskId);
+    }
   }
 }

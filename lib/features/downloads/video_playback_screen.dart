@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
+import '../../services/device_media_channel.dart';
 import '../../services/device_resources.dart';
 import '../../services/playback_position_service.dart';
 import '../../theme/app_theme.dart';
@@ -98,6 +99,17 @@ class _VideoPlaybackScreenState extends State<VideoPlaybackScreen> {
     }
   }
 
+  Future<void> _share() async {
+    try {
+      await DeviceMediaChannel().shareFile(widget.file.path);
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not share the file: $error')),
+      );
+    }
+  }
+
   void _toggleChrome() => setState(() => _showChrome = !_showChrome);
 
   Future<void> _pickSpeed() async {
@@ -137,7 +149,7 @@ class _VideoPlaybackScreenState extends State<VideoPlaybackScreen> {
   Widget build(BuildContext context) {
     final value = _controller.value;
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: AppColors.forest,
       body: GestureDetector(
         onTap: _toggleChrome,
         child: Stack(
@@ -236,6 +248,11 @@ class _VideoPlaybackScreenState extends State<VideoPlaybackScreen> {
                       ),
                     ),
                     _CircleButton(
+                      icon: Icons.ios_share_rounded,
+                      onPressed: _share,
+                    ),
+                    const SizedBox(width: 8),
+                    _CircleButton(
                       icon: _fill
                           ? Icons.fit_screen_rounded
                           : Icons.aspect_ratio_rounded,
@@ -269,7 +286,7 @@ class _VideoPlaybackScreenState extends State<VideoPlaybackScreen> {
                           width: 72,
                           height: 72,
                           decoration: const BoxDecoration(
-                            color: Colors.white,
+                            color: AppColors.primary,
                             shape: BoxShape.circle,
                           ),
                           child: Icon(
@@ -277,7 +294,7 @@ class _VideoPlaybackScreenState extends State<VideoPlaybackScreen> {
                                 ? Icons.pause_rounded
                                 : Icons.play_arrow_rounded,
                             size: 38,
-                            color: Colors.black,
+                            color: Colors.white,
                           ),
                         ),
                       ),
@@ -381,13 +398,16 @@ class _CircleButton extends StatelessWidget {
         width: size,
         height: size,
         child: Material(
-          color: Colors.white.withValues(alpha: 0.15),
-          shape: const CircleBorder(),
+          color: AppColors.forestSurface,
+          shape: const CircleBorder(
+            side: BorderSide(color: AppColors.forestBorder),
+          ),
           clipBehavior: Clip.antiAlias,
           child: InkWell(
             onTap: onPressed,
             child: Center(
-              child: Icon(icon, size: size * 0.45, color: Colors.white),
+              child: Icon(icon,
+                  size: size * 0.45, color: AppColors.forestText),
             ),
           ),
         ),
@@ -406,26 +426,32 @@ class _Pill extends StatelessWidget {
   final VoidCallback onTap;
 
   @override
-  Widget build(BuildContext context) => Material(
-        color: Colors.white.withValues(alpha: 0.15),
-        borderRadius: BorderRadius.circular(999),
-        child: InkWell(
+  Widget build(BuildContext context) => Container(
+        decoration: BoxDecoration(
+          color: AppColors.forestSurface,
           borderRadius: BorderRadius.circular(999),
-          onTap: onTap,
-          child: Padding(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(icon, size: 16, color: Colors.white),
-                const SizedBox(width: 6),
-                Text(label,
-                    style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600)),
-              ],
+          border: Border.all(color: AppColors.forestBorder),
+        ),
+        child: Material(
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(999),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(999),
+            onTap: onTap,
+            child: Padding(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(icon, size: 16, color: AppColors.forestText),
+                  const SizedBox(width: 6),
+                  Text(label,
+                      style: AppText.body(12,
+                          weight: FontWeight.w600,
+                          color: AppColors.forestText)),
+                ],
+              ),
             ),
           ),
         ),

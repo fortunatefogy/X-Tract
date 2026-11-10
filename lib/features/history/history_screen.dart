@@ -81,6 +81,13 @@ class _HistoryScreenState extends State<HistoryScreen> {
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    RoundIconButton(
+                      icon: Icons.arrow_back_rounded,
+                      tooltip: 'Back',
+                      size: 40,
+                      onPressed: () => Navigator.of(context).maybePop(),
+                    ),
+                    const SizedBox(width: 12),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -130,13 +137,42 @@ class _HistoryScreenState extends State<HistoryScreen> {
                     ),
                   )
                 else
-                  for (final entry in entries) _entryCard(entry),
+                  ..._grouped(entries),
               ],
             );
           },
         ),
       ),
     );
+  }
+
+  String _bucket(DateTime time) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final local = time.toLocal();
+    final day = DateTime(local.year, local.month, local.day);
+    final diff = today.difference(day).inDays;
+    if (diff <= 0) return 'Today';
+    if (diff == 1) return 'Yesterday';
+    if (diff < 7) return 'This week';
+    return 'Earlier';
+  }
+
+  List<Widget> _grouped(List<HistoryEntry> entries) {
+    final widgets = <Widget>[];
+    String? current;
+    for (final entry in entries) {
+      final bucket = _bucket(entry.visitedAt);
+      if (bucket != current) {
+        current = bucket;
+        widgets.add(Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: SectionLabel(bucket),
+        ));
+      }
+      widgets.add(_entryCard(entry));
+    }
+    return widgets;
   }
 
   Widget _entryCard(HistoryEntry entry) {
