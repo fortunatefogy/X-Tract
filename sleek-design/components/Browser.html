@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>InAppBrowser</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@200;300;400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Outfit:wght@100;200;300;400;500;600;700;800;900&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700;800;900&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@100;200;300;400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <script src="https://code.iconify.design/iconify-icon/3.0.0/iconify-icon.min.js"></script>
+    <style type="text/tailwindcss">
+      @theme inline {
+        --color-background: var(--background);
+        --color-foreground: var(--foreground);
+        --color-primary: var(--primary);
+        --color-primary-foreground: var(--primary-foreground);
+        --color-secondary: var(--secondary);
+        --color-secondary-foreground: var(--secondary-foreground);
+        --color-muted: var(--muted);
+        --color-muted-foreground: var(--muted-foreground);
+        --color-accent: var(--accent);
+        --color-accent-foreground: var(--accent-foreground);
+        --color-destructive: var(--destructive);
+        --color-destructive-foreground: var(--destructive-foreground);
+        --color-card: var(--card);
+        --color-card-foreground: var(--card-foreground);
+        --color-popover: var(--popover);
+        --color-popover-foreground: var(--popover-foreground);
+        --color-border: var(--border);
+        --color-input: var(--input);
+        --color-ring: var(--ring);
+        --color-chart-1: var(--chart-1);
+        --color-chart-2: var(--chart-2);
+        --color-chart-3: var(--chart-3);
+        --color-chart-4: var(--chart-4);
+        --color-chart-5: var(--chart-5);
+
+        --font-sans: var(--font-sans);
+        --font-heading: var(--font-heading, var(--font-sans));
+        --font-serif: var(--font-serif);
+        --font-mono: var(--font-mono);
+      }
+
+      @theme {
+        --radius-xs: calc(var(--radius) - 8px);
+        --radius-sm: calc(var(--radius) - 4px);
+        --radius-md: calc(var(--radius) - 2px);
+        --radius-lg: var(--radius);
+        --radius-xl: calc(var(--radius) + 4px);
+        --radius-2xl: calc(var(--radius) + 8px);
+        --radius-3xl: calc(var(--radius) + 16px);
+        --radius-4xl: calc(var(--radius) + 24px);
+      }
+
+      * {
+        corner-shape: var(--shape, round);
+      }
+
+      .rounded-full,
+      .rounded-none,
+      .rounded-t-full,
+      .rounded-t-none,
+      .rounded-r-full,
+      .rounded-r-none,
+      .rounded-b-full,
+      .rounded-b-none,
+      .rounded-l-full,
+      .rounded-l-none,
+      .rounded-s-full,
+      .rounded-s-none,
+      .rounded-e-full,
+      .rounded-e-none,
+      .rounded-tl-full,
+      .rounded-tl-none,
+      .rounded-tr-full,
+      .rounded-tr-none,
+      .rounded-bl-full,
+      .rounded-bl-none,
+      .rounded-br-full,
+      .rounded-br-none,
+      .rounded-ss-full,
+      .rounded-ss-none,
+      .rounded-se-full,
+      .rounded-se-none,
+      .rounded-es-full,
+      .rounded-es-none,
+      .rounded-ee-full,
+      .rounded-ee-none {
+        corner-shape: round;
+      }
+
+      @utility rounded-* {
+        border-radius: calc(
+          --value(--radius-*, [length], [percentage]) * var(--shape-multiplier, 1)
+        );
+      }
+      @utility rounded-t-* {
+        border-top-left-radius: calc(
+          --value(--radius-*, [length], [percentage]) * var(--shape-multiplier, 1)
+        );
+        border-top-right-radius: calc(
+          --value(--radius-*, [length], [percentage]) * var(--shape-multiplier, 1)
+        );
+      }
+      @utility rounded-r-* {
+        border-top-right-radius: calc(
+          --value(--radius-*, [length], [percentage]) * var(--shape-multiplier, 1)
+        );
+        border-bottom-right-radius: calc(
+          --value(--radius-*, [length], [percentage]) * var(--shape-multiplier, 1)
+        );
+      }
+      @utility rounded-b-* {
+        border-bottom-right-radius: calc(
+          --value(--radius-*, [length], [percentage]) * var(--shape-multiplier, 1)
+        );
+        border-bottom-left-radius: calc(
+          --value(--radius-*, [length], [percentage]) * var(--shape-multiplier, 1)
+        );
+      }
+      @utility rounded-l-* {
+        border-top-left-radius: calc(
+          --value(--radius-*, [length], [percentage]) * var(--shape-multiplier, 1)
+        );
+        border-bottom-left-radius: calc(
+          --value(--radius-*, [length], [percentage]) * var(--shape-multiplier, 1)
+        );
+      }
+      @utility rounded-tl-* {
+        border-top-left-radius: calc(
+          --value(--radius-*, [length], [percentage]) * var(--shape-multiplier, 1)
+        );
+      }
+      @utility rounded-tr-* {
+        border-top-right-radius: calc(
+          --value(--radius-*, [length], [percentage]) * var(--shape-multiplier, 1)
+        );
+      }
+      @utility rounded-bl-* {
+        border-bottom-left-radius: calc(
+          --value(--radius-*, [length], [percentage]) * var(--shape-multiplier, 1)
+        );
+      }
+      @utility rounded-br-* {
+        border-bottom-right-radius: calc(
+          --value(--radius-*, [length], [percentage]) * var(--shape-multiplier, 1)
+        );
+      }
+      @utility rounded-s-* {
+        border-start-start-radius: calc(
+          --value(--radius-*, [length], [percentage]) * var(--shape-multiplier, 1)
+        );
+        border-end-start-radius: calc(
+          --value(--radius-*, [length], [percentage]) * var(--shape-multiplier, 1)
+        );
+      }
+      @utility rounded-e-* {
+        border-start-end-radius: calc(
+          --value(--radius-*, [length], [percentage]) * var(--shape-multiplier, 1)
+        );
+        border-end-end-radius: calc(
+          --value(--radius-*, [length], [percentage]) * var(--shape-multiplier, 1)
+        );
+      }
+      @utility rounded-ss-* {
+        border-start-start-radius: calc(
+          --value(--radius-*, [length], [percentage]) * var(--shape-multiplier, 1)
+        );
+      }
+      @utility rounded-se-* {
+        border-start-end-radius: calc(
+          --value(--radius-*, [length], [percentage]) * var(--shape-multiplier, 1)
+        );
+      }
+      @utility rounded-es-* {
+        border-end-start-radius: calc(
+          --value(--radius-*, [length], [percentage]) * var(--shape-multiplier, 1)
+        );
+      }
+      @utility rounded-ee-* {
+        border-end-end-radius: calc(
+          --value(--radius-*, [length], [percentage]) * var(--shape-multiplier, 1)
+        );
+      }
+
+      @layer base {
+        * {
+          @apply border-border outline-ring/50;
+        }
+        body {
+          @apply bg-background text-foreground font-sans;
+        }
+      }
+
+      :root {
+        --shape: squircle;
+        --shape-multiplier: 1;
+
+        --background: #f6f7fa;
+        --foreground: #13151c;
+        --primary: #6c3bf4;
+        --primary-foreground: #ffffff;
+        --secondary: #ebedf3;
+        --secondary-foreground: #1d2030;
+        --muted: #eff1f6;
+        --muted-foreground: #6a7080;
+        --accent: #eee9ff;
+        --accent-foreground: #4b22c4;
+        --destructive: #e5484d;
+        --destructive-foreground: #ffffff;
+        --card: #ffffff;
+        --card-foreground: #13151c;
+        --popover: #ffffff;
+        --popover-foreground: #13151c;
+        --border: #e2e5ed;
+        --input: #eff1f6;
+        --ring: #6c3bf4;
+        --chart-1: #6c3bf4;
+        --chart-2: #14b8a6;
+        --chart-3: #f59e0b;
+        --chart-4: #e5484d;
+        --chart-5: #5b6275;
+
+        --font-sans: "Manrope", sans-serif;
+        --font-heading: "Outfit", sans-serif;
+        --font-serif: "Playfair Display", serif;
+        --font-mono: "JetBrains Mono", monospace;
+
+        --radius: 1rem;
+      }
+
+      @supports (corner-shape: squircle) {
+        :root {
+          --shape-multiplier: 2.5;
+        }
+      }
+
+      /* Prevent layout shift for icons without explicit dimensions */
+      iconify-icon:not([width]):not([height]) {
+        display: inline-block;
+        width: 1em;
+        height: 1em;
+      }
+
+      /* Hide scrollbars */
+      *,
+      *::before,
+      *::after {
+        scrollbar-width: none;
+        -ms-overflow-style: none;
+      }
+      *::-webkit-scrollbar {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div>
+      <div class="min-h-screen bg-background text-foreground font-sans relative pb-32">
+        <div class="px-5 pt-12 pb-3 flex items-center gap-2">
+          <button
+            class="size-10 rounded-full bg-card border border-border flex items-center justify-center"
+          >
+            <iconify-icon icon="ph:arrow-left" width="20" height="20"></iconify-icon></button
+          ><button
+            class="size-10 rounded-full bg-card border border-border flex items-center justify-center text-muted-foreground"
+          >
+            <iconify-icon icon="ph:arrow-right" width="20" height="20"></iconify-icon>
+          </button>
+          <div class="flex-1 h-10 rounded-full bg-input flex items-center gap-2 px-3 min-w-0">
+            <iconify-icon
+              icon="ph:lock-simple"
+              class="text-chart-2"
+              width="16"
+              height="16"
+            ></iconify-icon
+            ><span class="text-sm font-medium truncate">alpineseries.tv/episodes/04</span
+            ><iconify-icon
+              icon="ph:arrow-clockwise"
+              class="text-muted-foreground ml-auto"
+              width="16"
+              height="16"
+            ></iconify-icon>
+          </div>
+          <button
+            class="size-10 rounded-full bg-card border border-border flex items-center justify-center relative"
+          >
+            <iconify-icon icon="ph:copy-simple" width="20" height="20"></iconify-icon
+            ><span
+              class="absolute -top-0.5 -right-0.5 size-4 rounded-full bg-primary text-primary-foreground text-[10px] font-bold flex items-center justify-center"
+              >3</span
+            >
+          </button>
+        </div>
+        <div class="h-0.5 bg-primary w-2/3 rounded-full mx-5"></div>
+        <div class="px-5 pt-5">
+          <div class="relative h-44 rounded-2xl overflow-hidden border border-border">
+            <img
+              alt
+              src="https://ggrhecslgdflloszjkwl.supabase.co/storage/v1/object/public/user-assets/6Yir9E5KB2W/components/ucYcN2ZtY49.jpeg"
+              class="absolute inset-0 size-full object-cover"
+            />
+            <div class="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent"></div>
+            <span
+              class="absolute bottom-3 left-3 text-[11px] font-semibold uppercase tracking-wide text-white bg-white/20 rounded-full px-2.5 py-1"
+              >Series · Episode 04</span
+            >
+          </div>
+          <p class="text-xs font-semibold text-muted-foreground mt-4 uppercase tracking-wide">
+            alpineseries.tv
+          </p>
+          <h1 class="font-heading text-2xl font-extrabold tracking-tight mt-1 leading-tight">
+            Alpine Series: Ridge Lines at Dawn
+          </h1>
+          <p class="text-sm text-muted-foreground mt-2 leading-relaxed">
+            Follow the crew as they cross the eastern ridge before sunrise, with field notes, drone
+            footage and a full uncut trail sequence.
+          </p>
+          <div class="mt-5 flex flex-col gap-3">
+            <div class="bg-card border border-border rounded-2xl p-3 flex items-center gap-3">
+              <div
+                class="size-12 rounded-xl bg-gradient-to-br from-primary to-chart-2 flex items-center justify-center"
+              >
+                <iconify-icon
+                  icon="ph:play-fill"
+                  class="text-white"
+                  width="20"
+                  height="20"
+                ></iconify-icon>
+              </div>
+              <div class="flex-1 min-w-0">
+                <p class="text-sm font-semibold truncate">Episode 04 trailer</p>
+                <p class="text-xs text-muted-foreground">Loads after you press play</p>
+              </div>
+              <iconify-icon
+                icon="ph:dots-three"
+                class="text-muted-foreground"
+                width="20"
+                height="20"
+              ></iconify-icon>
+            </div>
+            <div class="bg-card border border-border rounded-2xl p-3 flex items-center gap-3">
+              <div
+                class="size-12 rounded-xl bg-gradient-to-br from-chart-3 to-destructive flex items-center justify-center"
+              >
+                <iconify-icon
+                  icon="ph:microphone-stage"
+                  class="text-white"
+                  width="20"
+                  height="20"
+                ></iconify-icon>
+              </div>
+              <div class="flex-1 min-w-0">
+                <p class="text-sm font-semibold truncate">Behind the Ridge podcast</p>
+                <p class="text-xs text-muted-foreground">Audio · 46 min</p>
+              </div>
+              <iconify-icon
+                icon="ph:dots-three"
+                class="text-muted-foreground"
+                width="20"
+                height="20"
+              ></iconify-icon>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="fixed inset-0 bg-foreground/30"></div>
+      <div
+        class="fixed bottom-0 left-0 right-0 bg-popover border-t border-border rounded-t-[28px] pt-3 pb-8 px-5 shadow-none"
+      >
+        <div class="mx-auto h-1.5 w-10 rounded-full bg-border"></div>
+        <div class="flex items-center justify-between mt-4">
+          <div>
+            <h2 class="font-heading text-xl font-bold tracking-tight">Media found</h2>
+            <p class="text-xs text-muted-foreground mt-0.5">6 items on this page</p>
+          </div>
+          <div class="flex items-center gap-1 bg-secondary rounded-full p-1">
+            <span
+              class="px-3 h-8 flex items-center rounded-full bg-card text-xs font-semibold shadow-none"
+              >All</span
+            ><span
+              class="px-3 h-8 flex items-center rounded-full text-xs font-medium text-muted-foreground"
+              >Video</span
+            ><span
+              class="px-3 h-8 flex items-center rounded-full text-xs font-medium text-muted-foreground"
+              >Audio</span
+            >
+          </div>
+        </div>
+        <div class="mt-4 flex flex-col gap-2 max-h-72 overflow-hidden">
+          <div class="bg-card border border-border rounded-2xl p-3 flex items-center gap-3">
+            <img
+              alt
+              src="https://ggrhecslgdflloszjkwl.supabase.co/storage/v1/object/public/user-assets/6Yir9E5KB2W/components/ri0VyZvgXXU.jpeg"
+              class="size-14 rounded-xl object-cover"
+            />
+            <div class="flex-1 min-w-0">
+              <p class="text-sm font-semibold truncate">Ridge Lines Drone Cut</p>
+              <p class="text-xs text-muted-foreground mt-0.5">
+                MP4 · 1080p · <span class="font-semibold text-foreground">214 MB</span>
+              </p>
+            </div>
+            <button
+              class="size-10 rounded-full bg-primary text-primary-foreground flex items-center justify-center"
+            >
+              <iconify-icon icon="ph:download-simple" width="20" height="20"></iconify-icon>
+            </button>
+          </div>
+          <div class="bg-card border border-border rounded-2xl p-3 flex items-center gap-3">
+            <img
+              alt
+              src="https://ggrhecslgdflloszjkwl.supabase.co/storage/v1/object/public/user-assets/6Yir9E5KB2W/components/2410t6ErMKj.jpeg"
+              class="size-14 rounded-xl object-cover"
+            />
+            <div class="flex-1 min-w-0">
+              <p class="text-sm font-semibold truncate">Behind the Ridge</p>
+              <p class="text-xs text-muted-foreground mt-0.5">
+                MP3 · 320 kbps · <span class="font-semibold text-foreground">46 MB</span>
+              </p>
+            </div>
+            <button class="size-10 rounded-full bg-secondary flex items-center justify-center">
+              <iconify-icon icon="ph:download-simple" width="20" height="20"></iconify-icon>
+            </button>
+          </div>
+        </div>
+      </div>
+      <div class="fixed bottom-[calc(theme(spacing.8)+12rem)] left-1/2 -translate-x-1/2"></div>
+      <nav
+        class="fixed bottom-0 left-0 right-0 bg-card border-t border-border px-2 pt-2 pb-6 flex z-10"
+      >
+        <div class="flex-1 flex flex-col items-center gap-1 text-muted-foreground">
+          <iconify-icon icon="ph:house" width="24" height="24"></iconify-icon
+          ><span class="text-[11px] font-medium">Home</span>
+        </div>
+        <div class="flex-1 flex flex-col items-center gap-1 text-muted-foreground">
+          <iconify-icon icon="ph:download-simple" width="24" height="24"></iconify-icon
+          ><span class="text-[11px] font-medium">Downloads</span>
+        </div>
+        <div class="flex-1 flex flex-col items-center gap-1 text-muted-foreground">
+          <iconify-icon icon="ph:folder-simple" width="24" height="24"></iconify-icon
+          ><span class="text-[11px] font-medium">Library</span>
+        </div>
+        <div class="flex-1 flex flex-col items-center gap-1 text-muted-foreground">
+          <iconify-icon icon="ph:gear" width="24" height="24"></iconify-icon
+          ><span class="text-[11px] font-medium">Settings</span>
+        </div>
+      </nav>
+    </div>
+  </body>
+</html>

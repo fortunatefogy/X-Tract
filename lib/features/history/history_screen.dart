@@ -1,12 +1,33 @@
 import 'package:flutter/material.dart';
 
 import '../../services/history_service.dart';
+import '../../theme/app_theme.dart';
+import '../../widgets/app_ui.dart';
 import '../browser/media_browser_screen.dart';
 
-class HistoryScreen extends StatelessWidget {
+class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key});
 
-  Future<void> _clear(BuildContext context) async {
+  @override
+  State<HistoryScreen> createState() => _HistoryScreenState();
+}
+
+class _HistoryScreenState extends State<HistoryScreen> {
+  final _searchController = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _searchController.addListener(() => setState(() {}));
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _clear() async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -40,82 +61,155 @@ class HistoryScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final palette = context.palette;
     final service = HistoryService.instance;
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('History'),
-        actions: [
-          IconButton(
-            tooltip: 'Clear history',
-            onPressed: () => _clear(context),
-            icon: const Icon(Icons.delete_sweep_outlined),
-          ),
-        ],
-      ),
-      body: ListenableBuilder(
-        listenable: service,
-        builder: (context, _) {
-          final entries = service.entries;
-          if (entries.isEmpty) {
-            return const Center(
-              child: Text('Pages you open in the Linky browser appear here.'),
-            );
-          }
-          return ListView.separated(
-            itemCount: entries.length,
-            separatorBuilder: (_, __) => const Divider(height: 1),
-            itemBuilder: (context, index) {
-              final entry = entries[index];
-              return ListTile(
-                leading: _thumbnail(entry, context),
-                title: Text(
-                  entry.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+      body: SafeArea(
+        child: ListenableBuilder(
+          listenable: service,
+          builder: (context, _) {
+            final query = _searchController.text.trim().toLowerCase();
+            final entries = service.entries
+                .where((entry) =>
+                    query.isEmpty ||
+                    entry.title.toLowerCase().contains(query) ||
+                    entry.url.toLowerCase().contains(query))
+                .toList(growable: false);
+            return ListView(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('History',
+                              style: AppText.display(30,
+                                  color: palette.foreground)),
+                          const SizedBox(height: 2),
+                          Text(
+                            '${service.entries.length} visited page${service.entries.length == 1 ? '' : 's'}',
+                            style: AppText.body(13,
+                                color: palette.mutedForeground),
+                          ),
+                        ],
+                      ),
+                    ),
+                    RoundIconButton(
+                      icon: Icons.delete_sweep_outlined,
+                      tooltip: 'Clear history',
+                      color: palette.destructive,
+                      onPressed: service.entries.isEmpty ? null : _clear,
+                    ),
+                  ],
                 ),
-                subtitle: Text(
-                  '${entry.url}\n${_relativeTime(entry.visitedAt)}',
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                isThreeLine: true,
-                onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => MediaBrowserScreen(initialUrl: entry.url),
+                const SizedBox(height: 18),
+                TextField(
+                  controller: _searchController,
+                  textInputAction: TextInputAction.search,
+                  decoration: InputDecoration(
+                    hintText: 'Search history',
+                    prefixIcon: Icon(Icons.search_rounded,
+                        size: 20, color: palette.mutedForeground),
                   ),
                 ),
-                trailing: IconButton(
-                  tooltip: 'Remove',
-                  onPressed: () => service.remove(entry.id),
-                  icon: const Icon(Icons.close),
-                ),
-              );
-            },
-          );
-        },
+                const SizedBox(height: 18),
+                if (entries.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 24),
+                    child: EmptyState(
+                      icon: query.isEmpty
+                          ? Icons.history_rounded
+                          : Icons.search_off_rounded,
+                      title: query.isEmpty ? 'No history yet' : 'No matches',
+                      message: query.isEmpty
+                          ? 'Pages you open in the Linky browser appear here.'
+                          : 'Try a different title or address.',
+                    ),
+                  )
+                else
+                  for (final entry in entries) _entryCard(entry),
+              ],
+            );
+          },
+        ),
       ),
     );
   }
 
-  Widget _thumbnail(HistoryEntry entry, BuildContext context) {
+  Widget _entryCard(HistoryEntry entry) {
+    final palette = context.palette;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: AppCard(
+        padding: const EdgeInsets.all(12),
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => MediaBrowserScreen(initialUrl: entry.url),
+          ),
+        ),
+        child: Row(
+          children: [
+            _thumbnail(entry),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(entry.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppText.body(14, weight: FontWeight.w700)),
+                  const SizedBox(height: 3),
+                  Text(entry.url,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppText.body(12,
+                          color: palette.mutedForeground)),
+                  const SizedBox(height: 2),
+                  Text(_relativeTime(entry.visitedAt),
+                      style: AppText.body(11,
+                          color: palette.mutedForeground)),
+                ],
+              ),
+            ),
+            IconButton(
+              tooltip: 'Remove',
+              onPressed: () => HistoryService.instance.remove(entry.id),
+              icon: Icon(Icons.close_rounded,
+                  size: 18, color: palette.mutedForeground),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _thumbnail(HistoryEntry entry) {
+    final palette = context.palette;
     final thumbnail = entry.thumbnail;
-    if (thumbnail == null || thumbnail.isEmpty) {
-      return _fallback(context);
-    }
+    final fallback = Container(
+      width: 52,
+      height: 52,
+      decoration: BoxDecoration(
+        color: palette.muted,
+        borderRadius: BorderRadius.circular(AppRadius.inner),
+      ),
+      child: Icon(Icons.public_rounded,
+          size: 22, color: palette.mutedForeground),
+    );
+    if (thumbnail == null || thumbnail.isEmpty) return fallback;
     return ClipRRect(
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: BorderRadius.circular(AppRadius.inner),
       child: Image.network(
         thumbnail,
-        width: 48,
-        height: 48,
+        width: 52,
+        height: 52,
         fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => _fallback(context),
+        errorBuilder: (_, __, ___) => fallback,
       ),
     );
   }
-
-  Widget _fallback(BuildContext context) => CircleAvatar(
-        backgroundColor: Theme.of(context).colorScheme.primaryContainer,
-        child: const Icon(Icons.public),
-      );
 }

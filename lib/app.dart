@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 
-import 'features/home/home_screen.dart';
+import 'features/shell/app_shell.dart';
 import 'services/settings_service.dart';
+import 'theme/app_theme.dart';
 
 class LinkyApp extends StatelessWidget {
   const LinkyApp({super.key});
@@ -15,31 +16,9 @@ class LinkyApp extends StatelessWidget {
         title: 'Linky',
         debugShowCheckedModeBanner: false,
         themeMode: settings.themeMode,
-        theme: ThemeData(
-          colorScheme: ColorScheme.fromSeed(
-            seedColor: const Color(0xFF5267E8),
-            brightness: Brightness.light,
-          ),
-          useMaterial3: true,
-          scaffoldBackgroundColor: const Color(0xFFF7F8FC),
-          cardTheme: const CardThemeData(
-            elevation: 0,
-            margin: EdgeInsets.zero,
-            color: Colors.white,
-          ),
-        ),
-        darkTheme: ThemeData(
-          colorScheme: ColorScheme.fromSeed(
-            seedColor: const Color(0xFF5267E8),
-            brightness: Brightness.dark,
-          ),
-          useMaterial3: true,
-          cardTheme: const CardThemeData(
-            elevation: 0,
-            margin: EdgeInsets.zero,
-          ),
-        ),
-        home: const HomeScreen(),
+        theme: AppTheme.light,
+        darkTheme: AppTheme.dark,
+        home: const AppShell(),
       ),
     );
   }

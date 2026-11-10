@@ -1,12 +1,33 @@
 import 'package:flutter/material.dart';
 
 import '../../services/bookmarks_service.dart';
+import '../../theme/app_theme.dart';
+import '../../widgets/app_ui.dart';
 import '../browser/media_browser_screen.dart';
 
-class BookmarksScreen extends StatelessWidget {
+class BookmarksScreen extends StatefulWidget {
   const BookmarksScreen({super.key});
 
-  Future<void> _clear(BuildContext context) async {
+  @override
+  State<BookmarksScreen> createState() => _BookmarksScreenState();
+}
+
+class _BookmarksScreenState extends State<BookmarksScreen> {
+  final _searchController = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _searchController.addListener(() => setState(() {}));
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _clear() async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -29,81 +50,152 @@ class BookmarksScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final palette = context.palette;
     final service = BookmarksService.instance;
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Bookmarks'),
-        actions: [
-          IconButton(
-            tooltip: 'Clear bookmarks',
-            onPressed: () => _clear(context),
-            icon: const Icon(Icons.delete_sweep_outlined),
-          ),
-        ],
-      ),
-      body: ListenableBuilder(
-        listenable: service,
-        builder: (context, _) {
-          final entries = service.entries;
-          if (entries.isEmpty) {
-            return const Center(
-              child: Text('Bookmark pages from the Linky browser.'),
-            );
-          }
-          return ListView.separated(
-            itemCount: entries.length,
-            separatorBuilder: (_, __) => const Divider(height: 1),
-            itemBuilder: (context, index) {
-              final entry = entries[index];
-              return ListTile(
-                leading: _thumbnail(entry, context),
-                title: Text(
-                  entry.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+      body: SafeArea(
+        child: ListenableBuilder(
+          listenable: service,
+          builder: (context, _) {
+            final query = _searchController.text.trim().toLowerCase();
+            final entries = service.entries
+                .where((entry) =>
+                    query.isEmpty ||
+                    entry.title.toLowerCase().contains(query) ||
+                    entry.url.toLowerCase().contains(query))
+                .toList(growable: false);
+            return ListView(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Bookmarks',
+                              style: AppText.display(30,
+                                  color: palette.foreground)),
+                          const SizedBox(height: 2),
+                          Text(
+                            '${service.entries.length} saved page${service.entries.length == 1 ? '' : 's'}',
+                            style: AppText.body(13,
+                                color: palette.mutedForeground),
+                          ),
+                        ],
+                      ),
+                    ),
+                    RoundIconButton(
+                      icon: Icons.delete_sweep_outlined,
+                      tooltip: 'Clear bookmarks',
+                      color: palette.destructive,
+                      onPressed: service.entries.isEmpty ? null : _clear,
+                    ),
+                  ],
                 ),
-                subtitle: Text(
-                  entry.url,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => MediaBrowserScreen(initialUrl: entry.url),
+                const SizedBox(height: 18),
+                TextField(
+                  controller: _searchController,
+                  textInputAction: TextInputAction.search,
+                  decoration: InputDecoration(
+                    hintText: 'Search bookmarks',
+                    prefixIcon: Icon(Icons.search_rounded,
+                        size: 20, color: palette.mutedForeground),
                   ),
                 ),
-                trailing: IconButton(
-                  tooltip: 'Remove bookmark',
-                  onPressed: () => service.remove(entry.id),
-                  icon: const Icon(Icons.bookmark_remove_outlined),
-                ),
-              );
-            },
-          );
-        },
+                const SizedBox(height: 18),
+                if (entries.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 24),
+                    child: EmptyState(
+                      icon: query.isEmpty
+                          ? Icons.bookmark_border_rounded
+                          : Icons.search_off_rounded,
+                      title:
+                          query.isEmpty ? 'No bookmarks yet' : 'No matches',
+                      message: query.isEmpty
+                          ? 'Bookmark pages from the Linky browser to keep them here.'
+                          : 'Try a different title or address.',
+                    ),
+                  )
+                else
+                  for (final entry in entries) _entryCard(entry),
+              ],
+            );
+          },
+        ),
       ),
     );
   }
 
-  Widget _thumbnail(BookmarkEntry entry, BuildContext context) {
+  Widget _entryCard(BookmarkEntry entry) {
+    final palette = context.palette;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: AppCard(
+        padding: const EdgeInsets.all(12),
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => MediaBrowserScreen(initialUrl: entry.url),
+          ),
+        ),
+        child: Row(
+          children: [
+            _thumbnail(entry),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(entry.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppText.body(14, weight: FontWeight.w700)),
+                  const SizedBox(height: 3),
+                  Text(entry.url,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppText.body(12,
+                          color: palette.mutedForeground)),
+                ],
+              ),
+            ),
+            IconButton(
+              tooltip: 'Remove bookmark',
+              onPressed: () => BookmarksService.instance.remove(entry.id),
+              icon: Icon(Icons.bookmark_remove_outlined,
+                  size: 18, color: palette.mutedForeground),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _thumbnail(BookmarkEntry entry) {
+    final palette = context.palette;
     final thumbnail = entry.thumbnail;
-    if (thumbnail == null || thumbnail.isEmpty) {
-      return _fallback(context);
-    }
+    final fallback = Container(
+      width: 52,
+      height: 52,
+      decoration: BoxDecoration(
+        color: palette.muted,
+        borderRadius: BorderRadius.circular(AppRadius.inner),
+      ),
+      child: Icon(Icons.bookmark_rounded,
+          size: 22, color: palette.mutedForeground),
+    );
+    if (thumbnail == null || thumbnail.isEmpty) return fallback;
     return ClipRRect(
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: BorderRadius.circular(AppRadius.inner),
       child: Image.network(
         thumbnail,
-        width: 48,
-        height: 48,
+        width: 52,
+        height: 52,
         fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => _fallback(context),
+        errorBuilder: (_, __, ___) => fallback,
       ),
     );
   }
-
-  Widget _fallback(BuildContext context) => CircleAvatar(
-        backgroundColor: Theme.of(context).colorScheme.primaryContainer,
-        child: const Icon(Icons.bookmark_outline),
-      );
 }

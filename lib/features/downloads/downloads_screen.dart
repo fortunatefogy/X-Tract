@@ -1,15 +1,12 @@
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../../services/device_media_channel.dart';
 import '../../services/download_service.dart';
-import '../../services/media_downloader.dart';
 import '../../services/storage_service.dart';
-import '../../widgets/media_thumbnail.dart';
-import 'video_playback_screen.dart';
+import '../../theme/app_theme.dart';
+import '../../widgets/app_ui.dart';
 
 class DownloadsScreen extends StatefulWidget {
   const DownloadsScreen({super.key});
@@ -19,11 +16,7 @@ class DownloadsScreen extends StatefulWidget {
 }
 
 class _DownloadsScreenState extends State<DownloadsScreen> {
-  final _deviceMedia = DeviceMediaChannel();
-  final Set<String> _selectedPaths = {};
-  late Future<List<File>> _files;
-  late Future<int> _totalFuture;
-  String _completedSignature = '';
+  int _segment = 0;
   final Map<String, DateTime> _speedSampledAt = {};
   final Map<String, double> _speedProgress = {};
   final Map<String, double> _speeds = {};
@@ -31,24 +24,18 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
   @override
   void initState() {
     super.initState();
-    _assignFiles();
-    DownloadService.instance.addListener(_onDownloadsChanged);
+    DownloadService.instance.addListener(_onChanged);
   }
 
-  void _assignFiles() {
-    final future = _loadFiles();
-    _files = future;
-    _totalFuture = future.then(_sumSizes);
+  @override
+  void dispose() {
+    DownloadService.instance.removeListener(_onChanged);
+    super.dispose();
   }
 
-  Future<int> _sumSizes(List<File> files) async {
-    var total = 0;
-    for (final file in files) {
-      try {
-        total += (await file.stat()).size;
-      } catch (_) {}
-    }
-    return total;
+  void _onChanged() {
+    if (!mounted) return;
+    setState(_sampleSpeeds);
   }
 
   void _sampleSpeeds() {
@@ -71,65 +58,17 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
     }
   }
 
-  @override
-  void dispose() {
-    DownloadService.instance.removeListener(_onDownloadsChanged);
-    super.dispose();
-  }
-
-  void _onDownloadsChanged() {
-    final signature = DownloadService.instance.records
-        .where((record) => record.state == DownloadState.complete)
-        .map((record) => record.taskId)
-        .join(',');
-    if (!mounted) return;
-    _sampleSpeeds();
-    setState(() {
-      if (signature != _completedSignature) {
-        _completedSignature = signature;
-        _assignFiles();
-      }
-    });
-  }
-
-  Future<List<File>> _loadFiles() async {
-    final directory = await StorageService.instance.downloadDirectory();
-    if (!await directory.exists()) return [];
-    final files = await directory
-        .list(followLinks: false)
-        .where((entity) => entity is File)
-        .cast<File>()
-        .toList();
-    final modified = <File, DateTime>{};
-    for (final file in files) {
-      modified[file] = (await file.stat()).modified;
-    }
-    files.sort((a, b) => modified[b]!.compareTo(modified[a]!));
-    return files;
-  }
-
-  void _refresh() => setState(_assignFiles);
-
   Future<void> _openFolder() async {
     final opened = await StorageService.instance.openFolder();
     if (!mounted) return;
-    if (!opened) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('No file manager could open the downloads folder.'),
-        ),
-      );
-    }
+    _toast(opened
+        ? 'Opening the downloads folder.'
+        : 'No file manager could open the downloads folder.');
   }
 
   Future<void> _moveDownloads() async {
     if (DownloadService.instance.active.isNotEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content:
-              Text('Finish or cancel active downloads before moving files.'),
-        ),
-      );
+      _toast('Finish or cancel active downloads before moving files.');
       return;
     }
     try {
@@ -137,21 +76,12 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
       final target = await StorageService.instance.downloadDirectory();
       await DownloadService.instance.relocateDownloads(target.path);
       if (!mounted) return;
-      setState(_assignFiles);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            moved == 0
-                ? 'No files needed to be moved.'
-                : 'Moved $moved file(s) to the current downloads location.',
-          ),
-        ),
-      );
+      setState(() {});
+      _toast(moved == 0
+          ? 'No files needed to be moved.'
+          : 'Moved $moved file(s) to the current downloads location.');
     } catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not move downloads: $error')),
-      );
+      _toast('Could not move downloads: $error');
     }
   }
 
@@ -159,576 +89,45 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
     final raw = DownloadService.instance.exportQueuedTasks();
     final count = (jsonDecode(raw) as List).length;
     if (count == 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No queued downloads to export.')),
-      );
+      _toast('No queued downloads to export.');
       return;
     }
     await Clipboard.setData(ClipboardData(text: raw));
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Copied $count queued task(s) to the clipboard.')),
-    );
+    _toast('Copied $count queued task(s) to the clipboard.');
   }
 
   Future<void> _importQueue() async {
     final data = await Clipboard.getData(Clipboard.kTextPlain);
     final raw = data?.text?.trim();
     if (raw == null || raw.isEmpty) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text('The clipboard does not contain a task list.')),
-      );
+      _toast('The clipboard does not contain a task list.');
       return;
     }
     try {
       final imported = await DownloadService.instance.importQueuedTasks(raw);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(imported == 0
-              ? 'No new tasks were imported.'
-              : 'Imported $imported queued task(s).'),
-        ),
-      );
+      _toast(imported == 0
+          ? 'No new tasks were imported.'
+          : 'Imported $imported queued task(s).');
     } catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not import the task list: $error')),
-      );
+      _toast('Could not import the task list: $error');
     }
-  }
-
-  Future<void> _delete(File file) async {
-    try {
-      if (await file.exists()) await file.delete();
-      if (!mounted) return;
-      setState(() {
-        _selectedPaths.remove(file.path);
-        _assignFiles();
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Download deleted')),
-      );
-    } on FileSystemException catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not delete file: ${error.message}')),
-      );
-    }
-  }
-
-  Future<void> _share(File file) async {
-    try {
-      await _deviceMedia.shareFile(file.path);
-    } catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not share the file: $error')),
-      );
-    }
-  }
-
-  Future<void> _openWith(File file) async {
-    try {
-      await _deviceMedia.openWithFile(file.path);
-    } catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('No app could open this file: $error')),
-      );
-    }
-  }
-
-  Future<void> _rename(File file) async {
-    final originalName = file.uri.pathSegments.last;
-    final controller = TextEditingController(text: originalName);
-    final value = await showDialog<String>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Rename file'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(border: OutlineInputBorder()),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () =>
-                Navigator.of(dialogContext).pop(controller.text.trim()),
-            child: const Text('Rename'),
-          ),
-        ],
-      ),
-    );
-    if (value == null || value.isEmpty || !mounted) return;
-    var name = MediaDownloader.sanitizeFilename(value);
-    if (!name.contains('.')) {
-      final dot = originalName.lastIndexOf('.');
-      if (dot > 0) name = '$name${originalName.substring(dot)}';
-    }
-    if (name == originalName) return;
-    try {
-      var target = File('${file.parent.path}${Platform.pathSeparator}$name');
-      var duplicate = 1;
-      final dot = name.lastIndexOf('.');
-      final stem = dot > 0 ? name.substring(0, dot) : name;
-      final extension = dot > 0 ? name.substring(dot) : '';
-      while (await target.exists()) {
-        target = File(
-          '${file.parent.path}${Platform.pathSeparator}$stem ($duplicate)$extension',
-        );
-        duplicate++;
-      }
-      await file.rename(target.path);
-      if (!mounted) return;
-      setState(() {
-        _selectedPaths.remove(file.path);
-        _assignFiles();
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('File renamed.')),
-      );
-    } on FileSystemException catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not rename the file: ${error.message}')),
-      );
-    }
-  }
-
-  Future<void> _saveSelectedToGallery() async {
-    final selected = _selectedPaths.toList();
-    var saved = 0;
-    var failed = 0;
-    for (final path in selected) {
-      try {
-        await _deviceMedia.saveToGallery(path);
-        saved++;
-      } on Exception catch (_) {
-        failed++;
-      }
-    }
-    if (!mounted) return;
-    setState(_selectedPaths.clear);
-    final message = saved == 0
-        ? 'No files were saved. Select supported image or video files and try again.'
-        : failed == 0
-            ? 'Saved $saved file(s) to your phone Gallery.'
-            : 'Saved $saved file(s); $failed could not be added to Gallery.';
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
-  }
-
-  void _previewImage(File file) {
-    showDialog<void>(
-      context: context,
-      builder: (context) => Dialog.fullscreen(
-        child: Scaffold(
-          appBar: AppBar(
-            title: Text(file.uri.pathSegments.last),
-            actions: [
-              IconButton(
-                tooltip: 'Delete file',
-                onPressed: () async {
-                  Navigator.pop(context);
-                  await _delete(file);
-                },
-                icon: const Icon(Icons.delete_outline),
-              ),
-            ],
-          ),
-          body: Center(
-            child: InteractiveViewer(
-              child: Image.file(file, fit: BoxFit.contain),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final downloads = DownloadService.instance;
-    final active = downloads.active;
-    final failures = downloads.failures;
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Downloads'),
-        actions: [
-          TextButton.icon(
-            onPressed: _selectedPaths.isEmpty ? null : _saveSelectedToGallery,
-            icon: const Icon(Icons.save_alt),
-            label: Text(_selectedPaths.isEmpty
-                ? 'Save to Gallery'
-                : 'Save (${_selectedPaths.length})'),
-          ),
-          IconButton(
-            tooltip: 'Refresh',
-            onPressed: _refresh,
-            icon: const Icon(Icons.refresh),
-          ),
-          PopupMenuButton<String>(
-            tooltip: 'Queue tools',
-            onSelected: (value) {
-              if (value == 'pauseAll') DownloadService.instance.pauseAll();
-              if (value == 'resumeAll') DownloadService.instance.resumeAll();
-              if (value == 'retryAll') DownloadService.instance.retryAll();
-              if (value == 'export') _exportQueue();
-              if (value == 'import') _importQueue();
-              if (value == 'openFolder') _openFolder();
-              if (value == 'move') _moveDownloads();
-            },
-            itemBuilder: (context) => [
-              PopupMenuItem(
-                value: 'pauseAll',
-                enabled: active.any((record) =>
-                    record.state == DownloadState.running ||
-                    record.state == DownloadState.queued ||
-                    record.state == DownloadState.retrying),
-                child: const Text('Pause all'),
-              ),
-              PopupMenuItem(
-                value: 'resumeAll',
-                enabled: active
-                    .any((record) => record.state == DownloadState.paused),
-                child: const Text('Resume all'),
-              ),
-              PopupMenuItem(
-                value: 'retryAll',
-                enabled: failures.isNotEmpty,
-                child: const Text('Retry all failed'),
-              ),
-              const PopupMenuDivider(),
-              const PopupMenuItem(
-                value: 'openFolder',
-                child: Text('Open downloads folder'),
-              ),
-              const PopupMenuItem(
-                value: 'move',
-                child: Text('Move downloads to current location'),
-              ),
-              const PopupMenuDivider(),
-              const PopupMenuItem(
-                value: 'export',
-                child: Text('Export queue to clipboard'),
-              ),
-              const PopupMenuItem(
-                value: 'import',
-                child: Text('Import queue from clipboard'),
-              ),
-            ],
-          ),
-        ],
-      ),
-      body: FutureBuilder<List<File>>(
-        future: _files,
-        builder: (context, snapshot) {
-          final loading = snapshot.connectionState != ConnectionState.done;
-          final files = snapshot.data ?? const <File>[];
-          return ListView(
-            padding: const EdgeInsets.all(16),
-            children: [
-              if (files.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: FutureBuilder<int>(
-                    future: _totalFuture,
-                    builder: (context, totalSnapshot) => Text(
-                      '${files.length} file${files.length == 1 ? '' : 's'} in downloads'
-                      '${totalSnapshot.hasData ? ' · ${_formatBytes(totalSnapshot.data!)}' : ''}',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey.shade700,
-                      ),
-                    ),
-                  ),
-                ),
-              if (active.isNotEmpty) ...[
-                _sectionHeader('In progress'),
-                ...active.map(_transferTile),
-                const SizedBox(height: 8),
-              ],
-              if (failures.isNotEmpty) ...[
-                _sectionHeader(
-                  'Needs attention',
-                  trailing: TextButton(
-                    onPressed: downloads.clearFinished,
-                    child: const Text('Clear'),
-                  ),
-                ),
-                ...failures.map(_transferTile),
-                const SizedBox(height: 8),
-              ],
-              if (active.isNotEmpty || failures.isNotEmpty)
-                const Divider(height: 24),
-              if (loading)
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 24),
-                  child: Center(child: CircularProgressIndicator()),
-                )
-              else if (files.isEmpty)
-                const Padding(
-                  padding: EdgeInsets.all(32),
-                  child: Text(
-                    'Your downloads will appear here and stay available offline.',
-                    textAlign: TextAlign.center,
-                  ),
-                )
-              else
-                ...files.map(_fileTile),
-            ],
-          );
-        },
-      ),
-    );
-  }
-
-  Widget _sectionHeader(String title, {Widget? trailing}) => Padding(
-        padding: const EdgeInsets.only(bottom: 8),
-        child: Row(
-          children: [
-            Expanded(
-              child: Text(
-                title,
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-            if (trailing != null) trailing,
-          ],
-        ),
-      );
-
-  Widget _transferTile(DownloadRecord record) {
-    final active = record.state.isActive;
-    final canPause = record.state == DownloadState.running;
-    final canResume = record.state == DownloadState.paused;
-    final canRetry = record.state == DownloadState.failed ||
-        record.state == DownloadState.canceled;
-    final canDismiss = record.state.isFinal;
-    return Card(
-      margin: const EdgeInsets.only(bottom: 8),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 10, 6, 12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(
-                  _stateIcon(record.state),
-                  color: record.state == DownloadState.failed
-                      ? Theme.of(context).colorScheme.error
-                      : Theme.of(context).colorScheme.primary,
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        record.title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontWeight: FontWeight.w600),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        _transferSubtitle(record),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.grey.shade700,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                if (canPause)
-                  IconButton(
-                    tooltip: 'Pause',
-                    onPressed: () => DownloadService.instance.pause(record),
-                    icon: const Icon(Icons.pause),
-                  ),
-                if (canResume)
-                  IconButton(
-                    tooltip: 'Resume',
-                    onPressed: () => DownloadService.instance.resume(record),
-                    icon: const Icon(Icons.play_arrow),
-                  ),
-                if (canRetry)
-                  IconButton(
-                    tooltip: 'Retry',
-                    onPressed: () => _retry(record),
-                    icon: const Icon(Icons.refresh),
-                  ),
-                if (active)
-                  IconButton(
-                    tooltip: 'Cancel',
-                    onPressed: () => DownloadService.instance.cancel(record),
-                    icon: const Icon(Icons.close),
-                  )
-                else if (canDismiss)
-                  IconButton(
-                    tooltip: 'Dismiss',
-                    onPressed: () => DownloadService.instance.dismiss(record),
-                    icon: const Icon(Icons.delete_outline),
-                  ),
-              ],
-            ),
-            if (active) ...[
-              const SizedBox(height: 8),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(4),
-                child: LinearProgressIndicator(
-                  value: record.progress > 0 ? record.progress : null,
-                ),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
   }
 
   Future<void> _retry(DownloadRecord record) async {
     try {
       await DownloadService.instance.retry(record);
     } catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not retry the download: $error')),
-      );
+      _toast('Could not retry the download: $error');
     }
   }
 
-  String _transferSubtitle(DownloadRecord record) {
-    final percent = (record.progress * 100).clamp(0, 100).toStringAsFixed(0);
-    final size = record.expectedBytes > 0
-        ? ' of ${_formatBytes(record.expectedBytes)}'
-        : '';
-    final rate = _speeds[record.taskId];
-    final speed = rate != null && rate.isFinite && rate > 0
-        ? ' · ${_formatSpeed(rate)}'
-        : '';
-    return switch (record.state) {
-      DownloadState.queued => record.error ?? 'Queued',
-      DownloadState.running => '$percent%$size$speed',
-      DownloadState.paused => 'Paused',
-      DownloadState.retrying => 'Waiting to retry…',
-      DownloadState.complete => 'Completed',
-      DownloadState.failed => record.error ?? 'Failed',
-      DownloadState.canceled => 'Canceled',
-    };
+  void _toast(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
   }
-
-  IconData _stateIcon(DownloadState state) => switch (state) {
-        DownloadState.queued => Icons.schedule,
-        DownloadState.running => Icons.downloading,
-        DownloadState.paused => Icons.pause_circle_outline,
-        DownloadState.retrying => Icons.autorenew,
-        DownloadState.complete => Icons.check_circle_outline,
-        DownloadState.failed => Icons.error_outline,
-        DownloadState.canceled => Icons.cancel_outlined,
-      };
-
-  Widget _fileTile(File file) {
-    final name = file.uri.pathSegments.last;
-    final isImage = RegExp(
-      r'\.(jpe?g|png|gif|webp|avif|bmp)$',
-      caseSensitive: false,
-    ).hasMatch(name);
-    final canPlayVideo = RegExp(
-      r'\.(mp4|m4v|webm|mov|3gp)$',
-      caseSensitive: false,
-    ).hasMatch(name);
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Card(
-        child: ListTile(
-          leading: isImage || canPlayVideo
-              ? MediaThumbnail(
-                  type: isImage ? 'image' : 'video',
-                  file: file,
-                  size: 52,
-                  fallback: _fileIcon(canPlayVideo),
-                )
-              : _fileIcon(false),
-          title: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis),
-          subtitle: FutureBuilder<FileStat>(
-            future: file.stat(),
-            builder: (context, stat) {
-              if (!stat.hasData) {
-                return const Text('Saved on this device');
-              }
-              return Text(_formatBytes(stat.data!.size));
-            },
-          ),
-          onTap: isImage
-              ? () => _previewImage(file)
-              : canPlayVideo
-                  ? () => Navigator.of(context).push(
-                        MaterialPageRoute<void>(
-                          builder: (_) => VideoPlaybackScreen(file: file),
-                        ),
-                      )
-                  : null,
-          trailing: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Checkbox(
-                value: _selectedPaths.contains(file.path),
-                onChanged: (selected) => setState(() {
-                  if (selected == true) {
-                    _selectedPaths.add(file.path);
-                  } else {
-                    _selectedPaths.remove(file.path);
-                  }
-                }),
-              ),
-              PopupMenuButton<String>(
-                tooltip: 'File actions',
-                onSelected: (value) {
-                  if (value == 'share') _share(file);
-                  if (value == 'open') _openWith(file);
-                  if (value == 'rename') _rename(file);
-                },
-                itemBuilder: (context) => const [
-                  PopupMenuItem(value: 'share', child: Text('Share')),
-                  PopupMenuItem(value: 'open', child: Text('Open with')),
-                  PopupMenuItem(value: 'rename', child: Text('Rename')),
-                ],
-              ),
-              IconButton(
-                tooltip: 'Delete file',
-                onPressed: () => _delete(file),
-                icon: const Icon(Icons.delete_outline),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _fileIcon(bool video) => CircleAvatar(
-        child: Icon(
-            video ? Icons.movie_outlined : Icons.insert_drive_file_outlined),
-      );
-
-  String _formatSpeed(double bytesPerSecond) =>
-      '${_formatBytes(bytesPerSecond.round())}/s';
 
   String _formatBytes(int bytes) {
     if (bytes < 1024) return '$bytes B';
@@ -738,4 +137,444 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
     }
     return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(2)} GB';
   }
+
+  String _formatSpeed(double bytesPerSecond) =>
+      '${_formatBytes(bytesPerSecond.round())}/s';
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.palette;
+    final downloads = DownloadService.instance;
+    final active = downloads.active;
+    final failures = downloads.failures;
+    final completed = downloads.records
+        .where((record) => record.state == DownloadState.complete)
+        .toList(growable: false);
+
+    final overall = active.isEmpty
+        ? 0.0
+        : active.map((record) => record.progress).reduce((a, b) => a + b) /
+            active.length;
+    final speed = _speeds.values
+        .where((value) => value.isFinite && value > 0)
+        .fold<double>(0, (sum, value) => sum + value);
+    final remainingBytes = active.fold<int>(
+      0,
+      (sum, record) => sum +
+          (record.expectedBytes > 0
+              ? (record.expectedBytes * (1 - record.progress)).round()
+              : 0),
+    );
+    final remaining = speed > 0 && remainingBytes > 0
+        ? Duration(seconds: (remainingBytes / speed).round())
+        : null;
+
+    return Scaffold(
+      body: SafeArea(
+        bottom: false,
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text('Downloads',
+                      style: AppText.display(30,
+                          color: palette.foreground)),
+                ),
+                PopupMenuButton<String>(
+                  tooltip: 'Queue tools',
+                  icon: Icon(Icons.more_horiz_rounded,
+                      color: palette.foreground),
+                  onSelected: (value) {
+                    if (value == 'pauseAll') downloads.pauseAll();
+                    if (value == 'resumeAll') downloads.resumeAll();
+                    if (value == 'retryAll') downloads.retryAll();
+                    if (value == 'clear') downloads.clearFinished();
+                    if (value == 'export') _exportQueue();
+                    if (value == 'import') _importQueue();
+                    if (value == 'openFolder') _openFolder();
+                    if (value == 'move') _moveDownloads();
+                  },
+                  itemBuilder: (context) => [
+                    PopupMenuItem(
+                      value: 'pauseAll',
+                      enabled: active.any((record) =>
+                          record.state == DownloadState.running ||
+                          record.state == DownloadState.queued ||
+                          record.state == DownloadState.retrying),
+                      child: const Text('Pause all'),
+                    ),
+                    PopupMenuItem(
+                      value: 'resumeAll',
+                      enabled: active.any(
+                          (record) => record.state == DownloadState.paused),
+                      child: const Text('Resume all'),
+                    ),
+                    PopupMenuItem(
+                      value: 'retryAll',
+                      enabled: failures.isNotEmpty,
+                      child: const Text('Retry all failed'),
+                    ),
+                    PopupMenuItem(
+                      value: 'clear',
+                      enabled: completed.isNotEmpty || failures.isNotEmpty,
+                      child: const Text('Clear finished'),
+                    ),
+                    const PopupMenuDivider(),
+                    const PopupMenuItem(
+                      value: 'openFolder',
+                      child: Text('Open downloads folder'),
+                    ),
+                    const PopupMenuItem(
+                      value: 'move',
+                      child: Text('Move downloads'),
+                    ),
+                    const PopupMenuItem(
+                      value: 'export',
+                      child: Text('Export queue'),
+                    ),
+                    const PopupMenuItem(
+                      value: 'import',
+                      child: Text('Import queue'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            const SizedBox(height: 18),
+            PillSegment<int>(
+              value: _segment,
+              onChanged: (value) => setState(() => _segment = value),
+              options: [
+                PillOption(0, 'Active', badge: '${active.length}'),
+                PillOption(1, 'Completed', badge: '${completed.length}'),
+              ],
+            ),
+            const SizedBox(height: 18),
+            Row(
+              children: [
+                Expanded(
+                  child: StatTile(
+                    label: 'Overall',
+                    value: '${(overall * 100).clamp(0, 100).round()}%',
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: StatTile(
+                    label: 'Speed',
+                    value: speed > 0 ? _formatSpeed(speed) : '—',
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: StatTile(
+                    label: 'Remaining',
+                    value: remaining == null
+                        ? '—'
+                        : remaining.inMinutes > 0
+                            ? '${remaining.inMinutes} min'
+                            : '${remaining.inSeconds}s',
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 22),
+            if (_segment == 0) ..._activeSection(active, failures),
+            if (_segment == 1) ..._completedSection(completed),
+          ],
+        ),
+      ),
+    );
+  }
+
+  List<Widget> _activeSection(
+    List<DownloadRecord> active,
+    List<DownloadRecord> failures,
+  ) {
+    if (active.isEmpty && failures.isEmpty) {
+      return [
+        const SizedBox(height: 24),
+        const EmptyState(
+          icon: Icons.download_done_rounded,
+          title: 'No active downloads',
+          message:
+              'Find media on the Home tab, then queue what you want to keep.',
+        ),
+      ];
+    }
+    final downloading = active
+        .where((record) => record.state == DownloadState.running)
+        .toList(growable: false);
+    final pending = active
+        .where((record) => record.state != DownloadState.running)
+        .toList(growable: false);
+    return [
+      if (downloading.isNotEmpty) ...[
+        SectionLabel('Downloading · ${downloading.length}'),
+        for (final record in downloading) _transferCard(record),
+        const SizedBox(height: 12),
+      ],
+      if (pending.isNotEmpty) ...[
+        SectionLabel('Queued · ${pending.length}'),
+        for (final record in pending) _transferCard(record),
+        const SizedBox(height: 12),
+      ],
+      if (failures.isNotEmpty) ...[
+        SectionLabel('Needs attention · ${failures.length}'),
+        for (final record in failures) _transferCard(record),
+      ],
+    ];
+  }
+
+  List<Widget> _completedSection(List<DownloadRecord> completed) {
+    if (completed.isEmpty) {
+      return [
+        const SizedBox(height: 24),
+        const EmptyState(
+          icon: Icons.folder_open_rounded,
+          title: 'No completed downloads yet',
+          message: 'Finished transfers will be listed here.',
+        ),
+      ];
+    }
+    return [
+      SectionLabel('Completed · ${completed.length}'),
+      for (final record in completed) _completedCard(record),
+    ];
+  }
+
+  Widget _completedCard(DownloadRecord record) {
+    final palette = context.palette;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: AppCard(
+        padding: const EdgeInsets.all(14),
+        child: Row(
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: AppColors.teal.withValues(alpha: 0.14),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.check_rounded,
+                  color: AppColors.teal, size: 20),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(record.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppText.body(14, weight: FontWeight.w700)),
+                  const SizedBox(height: 3),
+                  Text(
+                    record.expectedBytes > 0
+                        ? 'Completed · ${_formatBytes(record.expectedBytes)}'
+                        : 'Completed',
+                    style:
+                        AppText.body(12, color: palette.mutedForeground),
+                  ),
+                ],
+              ),
+            ),
+            IconButton(
+              tooltip: 'Dismiss',
+              onPressed: () => DownloadService.instance.dismiss(record),
+              icon: Icon(Icons.close_rounded,
+                  size: 18, color: palette.mutedForeground),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _transferCard(DownloadRecord record) {
+    final palette = context.palette;
+    final canPause = record.state == DownloadState.running;
+    final canResume = record.state == DownloadState.paused;
+    final canRetry = record.state == DownloadState.failed ||
+        record.state == DownloadState.canceled;
+    final canCancel = record.state.isActive;
+    final failed = record.state == DownloadState.failed;
+    final isPaused = record.state == DownloadState.paused ||
+        record.state == DownloadState.queued ||
+        record.state == DownloadState.retrying;
+    final ringColor = failed
+        ? palette.destructive
+        : isPaused
+            ? AppColors.amber
+            : AppColors.primary;
+    final percent = (record.progress * 100).clamp(0, 100).round();
+    final sizeDetail = record.expectedBytes > 0
+        ? '${_formatBytes((record.expectedBytes * record.progress).round())} of ${_formatBytes(record.expectedBytes)}'
+        : 'Preparing…';
+    final rate = _speeds[record.taskId];
+    final speedLabel = rate != null && rate.isFinite && rate > 0
+        ? ' · ${_formatSpeed(rate)}'
+        : '';
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: AppCard(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          children: [
+            Row(
+              children: [
+                SizedBox(
+                  width: 52,
+                  height: 52,
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      SizedBox(
+                        width: 52,
+                        height: 52,
+                        child: CircularProgressIndicator(
+                          value: record.progress > 0 ? record.progress : null,
+                          strokeWidth: 5,
+                          strokeCap: StrokeCap.round,
+                          backgroundColor: palette.muted,
+                          color: ringColor,
+                        ),
+                      ),
+                      Text('$percent%',
+                          style: AppText.body(11,
+                              weight: FontWeight.w800)),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(record.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style:
+                              AppText.body(14, weight: FontWeight.w700)),
+                      const SizedBox(height: 3),
+                      Text(
+                        _transferSubtitle(record, sizeDetail, speedLabel),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppText.body(12,
+                            color: palette.mutedForeground),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(AppRadius.pill),
+              child: LinearProgressIndicator(
+                value: record.progress > 0 ? record.progress : null,
+                minHeight: 6,
+                color: ringColor,
+                backgroundColor: palette.muted,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: canPause
+                      ? OutlinedButton.icon(
+                          onPressed: () =>
+                              DownloadService.instance.pause(record),
+                          style: OutlinedButton.styleFrom(
+                            backgroundColor: palette.secondary,
+                            side: BorderSide.none,
+                            minimumSize: const Size(0, 44),
+                          ),
+                          icon: const Icon(Icons.pause_rounded, size: 18),
+                          label: const Text('Pause'),
+                        )
+                      : canResume || canRetry
+                          ? FilledButton.icon(
+                              onPressed: canResume
+                                  ? () =>
+                                      DownloadService.instance.resume(record)
+                                  : () => _retry(record),
+                              icon: Icon(
+                                canResume
+                                    ? Icons.play_arrow_rounded
+                                    : Icons.refresh_rounded,
+                                size: 18,
+                              ),
+                              label:
+                                  Text(canResume ? 'Resume' : 'Retry'),
+                            )
+                          : OutlinedButton.icon(
+                              onPressed: null,
+                              style: OutlinedButton.styleFrom(
+                                backgroundColor: palette.secondary,
+                                side: BorderSide.none,
+                                minimumSize: const Size(0, 44),
+                              ),
+                              icon: const Icon(Icons.schedule_rounded,
+                                  size: 18),
+                              label: Text(_stateLabel(record.state)),
+                            ),
+                ),
+                const SizedBox(width: 8),
+                SizedBox(
+                  width: 44,
+                  height: 44,
+                  child: OutlinedButton(
+                    onPressed: canCancel
+                        ? () => DownloadService.instance.cancel(record)
+                        : () => DownloadService.instance.dismiss(record),
+                    style: OutlinedButton.styleFrom(
+                      padding: EdgeInsets.zero,
+                      shape: const CircleBorder(),
+                      side: BorderSide(color: palette.border),
+                      foregroundColor: palette.destructive,
+                      minimumSize: const Size(44, 44),
+                    ),
+                    child: const Icon(Icons.close_rounded, size: 18),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _stateLabel(DownloadState state) => switch (state) {
+        DownloadState.queued => 'Queued',
+        DownloadState.running => 'Downloading',
+        DownloadState.paused => 'Paused',
+        DownloadState.retrying => 'Retrying',
+        DownloadState.complete => 'Completed',
+        DownloadState.failed => 'Failed',
+        DownloadState.canceled => 'Canceled',
+      };
+
+  String _transferSubtitle(
+    DownloadRecord record,
+    String sizeDetail,
+    String speedLabel,
+  ) =>
+      switch (record.state) {
+        DownloadState.queued => '$sizeDetail · Waiting',
+        DownloadState.running => '$sizeDetail$speedLabel',
+        DownloadState.paused => '$sizeDetail · Paused',
+        DownloadState.retrying => '$sizeDetail · Waiting to retry',
+        DownloadState.complete => 'Completed',
+        DownloadState.failed => record.error ?? 'Failed',
+        DownloadState.canceled => 'Canceled',
+      };
 }

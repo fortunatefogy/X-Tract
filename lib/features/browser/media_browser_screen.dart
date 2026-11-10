@@ -20,6 +20,8 @@ import '../../services/settings_service.dart';
 import '../../services/storage_service.dart';
 import '../../services/suggestions_service.dart';
 import '../../services/detection_log_service.dart';
+import '../../theme/app_theme.dart';
+import '../../widgets/app_ui.dart';
 import '../../widgets/media_thumbnail.dart';
 import '../bookmarks/bookmarks_screen.dart';
 import '../downloads/downloads_screen.dart';
@@ -2083,10 +2085,22 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
                 children: [
                   Padding(
                     padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
-                    child: Text(
-                        videosOnly ? 'Video download options' : 'Media found',
-                        style: const TextStyle(
-                            fontSize: 18, fontWeight: FontWeight.w700)),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          videosOnly ? 'Video options' : 'Media found',
+                          style: AppText.heading(20,
+                              color: context.palette.foreground),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          '${_candidates.length} item${_candidates.length == 1 ? '' : 's'} on this page',
+                          style: AppText.body(12,
+                              color: context.palette.mutedForeground),
+                        ),
+                      ],
+                    ),
                   ),
                   SwitchListTile(
                     title:
@@ -2292,6 +2306,124 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
             ),
           );
         },
+      ),
+    );
+  }
+
+  String _tabLabel(_BrowserTab tab) {
+    if (tab.title.isNotEmpty && tab.title != 'New tab') return tab.title;
+    if (tab.url.isEmpty) return 'New tab';
+    final host = Uri.tryParse(tab.url)?.host ?? '';
+    return host.isNotEmpty ? host : tab.url;
+  }
+
+  void _showTabsSheet() {
+    final palette = context.palette;
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (sheetContext, setSheetState) => SafeArea(
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 4, 12, 8),
+                  child: Row(
+                    children: [
+                      Expanded(
+                          child: Text('Tabs', style: AppText.heading(18))),
+                      TextButton.icon(
+                        onPressed: () => setSheetState(() => _addTab()),
+                        icon: const Icon(Icons.add_rounded, size: 18),
+                        label: const Text('New tab'),
+                      ),
+                    ],
+                  ),
+                ),
+                for (var i = 0; i < _tabs.length; i++)
+                  ListTile(
+                    selected: i == _activeIndex,
+                    selectedTileColor: palette.accent,
+                    leading: Icon(
+                      Icons.public_rounded,
+                      color: i == _activeIndex
+                          ? AppColors.primary
+                          : palette.mutedForeground,
+                    ),
+                    title: Text(
+                      _tabLabel(_tabs[i]),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppText.body(
+                        14,
+                        weight: i == _activeIndex
+                            ? FontWeight.w700
+                            : FontWeight.w500,
+                      ),
+                    ),
+                    trailing: IconButton(
+                      tooltip: 'Close tab',
+                      onPressed: () => setSheetState(() {
+                        _closeTab(i);
+                      }),
+                      icon: const Icon(Icons.close_rounded, size: 18),
+                    ),
+                    onTap: () {
+                      setSheetState(() => _selectTab(i));
+                      Navigator.of(sheetContext).pop();
+                    },
+                  ),
+                Divider(height: 20, color: palette.border),
+                ListTile(
+                  leading: Icon(
+                    _tab.desktopMode
+                        ? Icons.phone_iphone_rounded
+                        : Icons.desktop_windows_rounded,
+                  ),
+                  title: Text(
+                    _tab.desktopMode
+                        ? 'Switch to mobile site'
+                        : 'Switch to desktop site',
+                  ),
+                  onTap: () {
+                    Navigator.of(sheetContext).pop();
+                    _toggleDesktopMode();
+                  },
+                ),
+                ListTile(
+                  leading: Icon(
+                    BookmarksService.instance
+                            .isBookmarked(_addressController.text.trim())
+                        ? Icons.bookmark_rounded
+                        : Icons.bookmark_border_rounded,
+                  ),
+                  title: Text(
+                    BookmarksService.instance
+                            .isBookmarked(_addressController.text.trim())
+                        ? 'Remove bookmark'
+                        : 'Bookmark this page',
+                  ),
+                  onTap: () {
+                    Navigator.of(sheetContext).pop();
+                    _toggleBookmark();
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.settings_outlined),
+                  title: const Text('Browser settings'),
+                  onTap: () {
+                    Navigator.of(sheetContext).pop();
+                    _showBrowserMenu();
+                  },
+                ),
+                const SizedBox(height: 8),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -2889,55 +3021,79 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
       },
       child: Scaffold(
         appBar: AppBar(
-          leading: IconButton(
-            tooltip: 'Back',
-            onPressed: _handleBack,
-            icon: const Icon(Icons.arrow_back),
+          toolbarHeight: 60,
+          leadingWidth: 100,
+          leading: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                tooltip: 'Back',
+                onPressed: _handleBack,
+                icon: const Icon(Icons.arrow_back_rounded),
+              ),
+              IconButton(
+                tooltip: 'Forward',
+                onPressed: _tab.canGoForward
+                    ? () async {
+                        await _webController?.goForward();
+                        await _updateNavigationState(_tab);
+                      }
+                    : null,
+                icon: const Icon(Icons.arrow_forward_rounded),
+              ),
+            ],
           ),
           titleSpacing: 0,
-          title: TextField(
-            controller: _addressController,
-            focusNode: _addressFocus,
-            keyboardType: TextInputType.url,
-            textInputAction: TextInputAction.go,
-            onChanged: (_) => _updateSuggestions(),
-            onSubmitted: (_) => _navigate(),
-            decoration: const InputDecoration(
-              hintText: 'Search or enter website address',
-              border: InputBorder.none,
-              contentPadding: EdgeInsets.symmetric(horizontal: 8),
+          title: Container(
+            height: 44,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            decoration: BoxDecoration(
+              color: context.palette.input,
+              borderRadius: BorderRadius.circular(AppRadius.pill),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.lock_rounded, size: 15, color: AppColors.teal),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: TextField(
+                    controller: _addressController,
+                    focusNode: _addressFocus,
+                    keyboardType: TextInputType.url,
+                    textInputAction: TextInputAction.go,
+                    onChanged: (_) => _updateSuggestions(),
+                    onSubmitted: (_) => _navigate(),
+                    style: AppText.body(13),
+                    decoration: const InputDecoration(
+                      isDense: true,
+                      filled: false,
+                      hintText: 'Search or enter address',
+                      border: InputBorder.none,
+                      enabledBorder: InputBorder.none,
+                      focusedBorder: InputBorder.none,
+                    ),
+                  ),
+                ),
+                GestureDetector(
+                  onTap: () => _webController?.reload(),
+                  child: Icon(
+                    Icons.refresh_rounded,
+                    size: 17,
+                    color: context.palette.mutedForeground,
+                  ),
+                ),
+              ],
             ),
           ),
           actions: [
-            IconButton(
-              tooltip: _tab.desktopMode ? 'Mobile site' : 'Desktop site',
-              onPressed: _toggleDesktopMode,
-              icon: Icon(
-                _tab.desktopMode ? Icons.phone_iphone : Icons.desktop_windows,
+            Padding(
+              padding: const EdgeInsets.only(right: 12),
+              child: RoundIconButton(
+                icon: Icons.tab_rounded,
+                tooltip: 'Tabs and options',
+                badge: _tabs.length > 1 ? '${_tabs.length}' : null,
+                onPressed: _showTabsSheet,
               ),
-            ),
-            IconButton(
-              tooltip: BookmarksService.instance
-                      .isBookmarked(_addressController.text.trim())
-                  ? 'Remove bookmark'
-                  : 'Bookmark this page',
-              onPressed: _toggleBookmark,
-              icon: Icon(
-                BookmarksService.instance
-                        .isBookmarked(_addressController.text.trim())
-                    ? Icons.bookmark
-                    : Icons.bookmark_border,
-              ),
-            ),
-            IconButton(
-              tooltip: 'Go to address',
-              onPressed: _navigate,
-              icon: const Icon(Icons.search),
-            ),
-            IconButton(
-              tooltip: 'Browser settings',
-              onPressed: _showBrowserMenu,
-              icon: const Icon(Icons.more_vert),
             ),
           ],
           bottom: _tab.loading
@@ -2950,51 +3106,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
         ),
         body: Column(
           children: [
-            SizedBox(
-              height: 46,
-              child: Row(
-                children: [
-                  Expanded(
-                    child: ListView.separated(
-                      scrollDirection: Axis.horizontal,
-                      padding: const EdgeInsets.symmetric(horizontal: 8),
-                      itemCount: _tabs.length,
-                      separatorBuilder: (_, __) => const SizedBox(width: 6),
-                      itemBuilder: (context, index) {
-                        final tab = _tabs[index];
-                        final label = tab.title.isNotEmpty &&
-                                tab.title != 'New tab'
-                            ? tab.title
-                            : tab.url.isEmpty
-                                ? 'New tab'
-                                : Uri.tryParse(tab.url)?.host.isNotEmpty == true
-                                    ? Uri.tryParse(tab.url)!.host
-                                    : tab.url;
-                        return InputChip(
-                          selected: index == _activeIndex,
-                          onSelected: (_) => _selectTab(index),
-                          onDeleted: () => _closeTab(index),
-                          deleteIcon: const Icon(Icons.close, size: 16),
-                          label: ConstrainedBox(
-                            constraints: const BoxConstraints(maxWidth: 160),
-                            child: Text(
-                              label,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: 'New tab',
-                    onPressed: () => _addTab(),
-                    icon: const Icon(Icons.add),
-                  ),
-                ],
-              ),
-            ),
+            const SizedBox(height: 6),
             if (_addressFocus.hasFocus && _suggestions.isNotEmpty)
               Material(
                 elevation: 3,
@@ -3056,47 +3168,53 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
                 ],
               ),
             ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  IconButton(
-                    tooltip: 'Back',
-                    onPressed: _tab.canGoBack ? _handleBack : null,
-                    icon: const Icon(Icons.arrow_back),
-                  ),
-                  IconButton(
-                    tooltip: 'Forward',
-                    onPressed: _tab.canGoForward
-                        ? () async {
-                            await _webController?.goForward();
-                            await _updateNavigationState(_tab);
-                          }
-                        : null,
-                    icon: const Icon(Icons.arrow_forward),
-                  ),
-                  IconButton(
-                    tooltip: 'Reload page',
-                    onPressed: () => _webController?.reload(),
-                    icon: const Icon(Icons.refresh),
-                  ),
-                ],
-              ),
-            ),
             if (_candidates.isNotEmpty)
-              SafeArea(
-                top: false,
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
                 child: Material(
-                  color: Theme.of(context).colorScheme.primaryContainer,
-                  child: ListTile(
-                    leading: const Icon(Icons.movie_filter_outlined),
-                    title: Text(
-                        '${_candidates.length} media item${_candidates.length == 1 ? '' : 's'} found'),
-                    subtitle:
-                        const Text('Media requests detected on this page'),
-                    trailing: const Icon(Icons.keyboard_arrow_up),
+                  color: context.palette.card,
+                  shape: StadiumBorder(
+                    side: BorderSide(color: context.palette.border),
+                  ),
+                  child: InkWell(
+                    customBorder: const StadiumBorder(),
                     onTap: _showCandidates,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 10,
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 30,
+                            height: 30,
+                            decoration: BoxDecoration(
+                              color: context.palette.accent,
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(
+                              Icons.download_rounded,
+                              size: 17,
+                              color: context.palette.accentForeground,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              '${_candidates.length} media item${_candidates.length == 1 ? '' : 's'} found',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: AppText.body(13,
+                                  weight: FontWeight.w700),
+                            ),
+                          ),
+                          Icon(Icons.keyboard_arrow_up_rounded,
+                              size: 20,
+                              color: context.palette.mutedForeground),
+                        ],
+                      ),
+                    ),
                   ),
                 ),
               ),

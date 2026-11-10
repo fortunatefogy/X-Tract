@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Settings</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@200;300;400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Outfit:wght@100;200;300;400;500;600;700;800;900&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700;800;900&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@100;200;300;400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <script src="https://code.iconify.design/iconify-icon/3.0.0/iconify-icon.min.js"></script>
+    <style type="text/tailwindcss">
+      @theme inline {
+        --color-background: var(--background);
+        --color-foreground: var(--foreground);
+        --color-primary: var(--primary);
+        --color-primary-foreground: var(--primary-foreground);
+        --color-secondary: var(--secondary);
+        --color-secondary-foreground: var(--secondary-foreground);
+        --color-muted: var(--muted);
+        --color-muted-foreground: var(--muted-foreground);
+        --color-accent: var(--accent);
+        --color-accent-foreground: var(--accent-foreground);
+        --color-destructive: var(--destructive);
+        --color-destructive-foreground: var(--destructive-foreground);
+        --color-card: var(--card);
+        --color-card-foreground: var(--card-foreground);
+        --color-popover: var(--popover);
+        --color-popover-foreground: var(--popover-foreground);
+        --color-border: var(--border);
+        --color-input: var(--input);
+        --color-ring: var(--ring);
+        --color-chart-1: var(--chart-1);
+        --color-chart-2: var(--chart-2);
+        --color-chart-3: var(--chart-3);
+        --color-chart-4: var(--chart-4);
+        --color-chart-5: var(--chart-5);
+
+        --font-sans: var(--font-sans);
+        --font-heading: var(--font-heading, var(--font-sans));
+        --font-serif: var(--font-serif);
+        --font-mono: var(--font-mono);
+      }
+
+      @theme {
+        --radius-xs: calc(var(--radius) - 8px);
+        --radius-sm: calc(var(--radius) - 4px);
+        --radius-md: calc(var(--radius) - 2px);
+        --radius-lg: var(--radius);
+        --radius-xl: calc(var(--radius) + 4px);
+        --radius-2xl: calc(var(--radius) + 8px);
+        --radius-3xl: calc(var(--radius) + 16px);
+        --radius-4xl: calc(var(--radius) + 24px);
+      }
+
+      * {
+        corner-shape: var(--shape, round);
+      }
+
+      .rounded-full,
+      .rounded-none,
+      .rounded-t-full,
+      .rounded-t-none,
+      .rounded-r-full,
+      .rounded-r-none,
+      .rounded-b-full,
+      .rounded-b-none,
+      .rounded-l-full,
+      .rounded-l-none,
+      .rounded-s-full,
+      .rounded-s-none,
+      .rounded-e-full,
+      .rounded-e-none,
+      .rounded-tl-full,
+      .rounded-tl-none,
+      .rounded-tr-full,
+      .rounded-tr-none,
+      .rounded-bl-full,
+      .rounded-bl-none,
+      .rounded-br-full,
+      .rounded-br-none,
+      .rounded-ss-full,
+      .rounded-ss-none,
+      .rounded-se-full,
+      .rounded-se-none,
+      .rounded-es-full,
+      .rounded-es-none,
+      .rounded-ee-full,
+      .rounded-ee-none {
+        corner-shape: round;
+      }
+
+      @utility rounded-* {
+        border-radius: calc(
+          --value(--radius-*, [length], [percentage]) * var(--shape-multiplier, 1)
+        );
+      }
+      @utility rounded-t-* {
+        border-top-left-radius: calc(
+          --value(--radius-*, [length], [percentage]) * var(--shape-multiplier, 1)
+        );
+        border-top-right-radius: calc(
+          --value(--radius-*, [length], [percentage]) * var(--shape-multiplier, 1)
+        );
+      }
+      @utility rounded-r-* {
+        border-top-right-radius: calc(
+          --value(--radius-*, [length], [percentage]) * var(--shape-multiplier, 1)
+        );
+        border-bottom-right-radius: calc(
+          --value(--radius-*, [length], [percentage]) * var(--shape-multiplier, 1)
+        );
+      }
+      @utility rounded-b-* {
+        border-bottom-right-radius: calc(
+          --value(--radius-*, [length], [percentage]) * var(--shape-multiplier, 1)
+        );
+        border-bottom-left-radius: calc(
+          --value(--radius-*, [length], [percentage]) * var(--shape-multiplier, 1)
+        );
+      }
+      @utility rounded-l-* {
+        border-top-left-radius: calc(
+          --value(--radius-*, [length], [percentage]) * var(--shape-multiplier, 1)
+        );
+        border-bottom-left-radius: calc(
+          --value(--radius-*, [length], [percentage]) * var(--shape-multiplier, 1)
+        );
+      }
+      @utility rounded-tl-* {
+        border-top-left-radius: calc(
+          --value(--radius-*, [length], [percentage]) * var(--shape-multiplier, 1)
+        );
+      }
+      @utility rounded-tr-* {
+        border-top-right-radius: calc(
+          --value(--radius-*, [length], [percentage]) * var(--shape-multiplier, 1)
+        );
+      }
+      @utility rounded-bl-* {
+        border-bottom-left-radius: calc(
+          --value(--radius-*, [length], [percentage]) * var(--shape-multiplier, 1)
+        );
+      }
+      @utility rounded-br-* {
+        border-bottom-right-radius: calc(
+          --value(--radius-*, [length], [percentage]) * var(--shape-multiplier, 1)
+        );
+      }
+      @utility rounded-s-* {
+        border-start-start-radius: calc(
+          --value(--radius-*, [length], [percentage]) * var(--shape-multiplier, 1)
+        );
+        border-end-start-radius: calc(
+          --value(--radius-*, [length], [percentage]) * var(--shape-multiplier, 1)
+        );
+      }
+      @utility rounded-e-* {
+        border-start-end-radius: calc(
+          --value(--radius-*, [length], [percentage]) * var(--shape-multiplier, 1)
+        );
+        border-end-end-radius: calc(
+          --value(--radius-*, [length], [percentage]) * var(--shape-multiplier, 1)
+        );
+      }
+      @utility rounded-ss-* {
+        border-start-start-radius: calc(
+          --value(--radius-*, [length], [percentage]) * var(--shape-multiplier, 1)
+        );
+      }
+      @utility rounded-se-* {
+        border-start-end-radius: calc(
+          --value(--radius-*, [length], [percentage]) * var(--shape-multiplier, 1)
+        );
+      }
+      @utility rounded-es-* {
+        border-end-start-radius: calc(
+          --value(--radius-*, [length], [percentage]) * var(--shape-multiplier, 1)
+        );
+      }
+      @utility rounded-ee-* {
+        border-end-end-radius: calc(
+          --value(--radius-*, [length], [percentage]) * var(--shape-multiplier, 1)
+        );
+      }
+
+      @layer base {
+        * {
+          @apply border-border outline-ring/50;
+        }
+        body {
+          @apply bg-background text-foreground font-sans;
+        }
+      }
+
+      :root {
+        --shape: squircle;
+        --shape-multiplier: 1;
+
+        --background: #f6f7fa;
+        --foreground: #13151c;
+        --primary: #6c3bf4;
+        --primary-foreground: #ffffff;
+        --secondary: #ebedf3;
+        --secondary-foreground: #1d2030;
+        --muted: #eff1f6;
+        --muted-foreground: #6a7080;
+        --accent: #eee9ff;
+        --accent-foreground: #4b22c4;
+        --destructive: #e5484d;
+        --destructive-foreground: #ffffff;
+        --card: #ffffff;
+        --card-foreground: #13151c;
+        --popover: #ffffff;
+        --popover-foreground: #13151c;
+        --border: #e2e5ed;
+        --input: #eff1f6;
+        --ring: #6c3bf4;
+        --chart-1: #6c3bf4;
+        --chart-2: #14b8a6;
+        --chart-3: #f59e0b;
+        --chart-4: #e5484d;
+        --chart-5: #5b6275;
+
+        --font-sans: "Manrope", sans-serif;
+        --font-heading: "Outfit", sans-serif;
+        --font-serif: "Playfair Display", serif;
+        --font-mono: "JetBrains Mono", monospace;
+
+        --radius: 1rem;
+      }
+
+      @supports (corner-shape: squircle) {
+        :root {
+          --shape-multiplier: 2.5;
+        }
+      }
+
+      /* Prevent layout shift for icons without explicit dimensions */
+      iconify-icon:not([width]):not([height]) {
+        display: inline-block;
+        width: 1em;
+        height: 1em;
+      }
+
+      /* Hide scrollbars */
+      *,
+      *::before,
+      *::after {
+        scrollbar-width: none;
+        -ms-overflow-style: none;
+      }
+      *::-webkit-scrollbar {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div>
+      <div class="min-h-screen bg-background text-foreground font-sans pb-32">
+        <div class="px-5 pt-12">
+          <h1 class="font-heading text-3xl font-extrabold tracking-tight">Settings</h1>
+          <p class="text-sm text-muted-foreground mt-1">Tune how Linky finds and saves media.</p>
+        </div>
+        <div class="px-5 mt-6">
+          <p class="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2 px-1">
+            Appearance
+          </p>
+          <div class="bg-card border border-border rounded-2xl p-4">
+            <p class="text-sm font-semibold">Theme</p>
+            <div class="mt-3 bg-secondary rounded-full p-1 flex">
+              <button class="flex-1 h-9 rounded-full text-sm font-medium text-muted-foreground">
+                Light</button
+              ><button class="flex-1 h-9 rounded-full bg-card text-sm font-semibold shadow-none">
+                Dark</button
+              ><button class="flex-1 h-9 rounded-full text-sm font-medium text-muted-foreground">
+                System
+              </button>
+            </div>
+          </div>
+        </div>
+        <div class="px-5 mt-6">
+          <p class="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2 px-1">
+            Browser
+          </p>
+          <div class="bg-card border border-border rounded-2xl divide-y divide-border">
+            <div class="flex items-center gap-3 p-4">
+              <div class="flex-1">
+                <p class="text-sm font-semibold">Open links in browser</p>
+                <p class="text-xs text-muted-foreground mt-0.5">Shared pages open inside Linky</p>
+              </div>
+              <div class="w-11 h-6 rounded-full bg-primary relative">
+                <span class="absolute right-0.5 top-0.5 size-5 rounded-full bg-white"></span>
+              </div>
+            </div>
+            <div class="flex items-center gap-3 p-4">
+              <div class="flex-1">
+                <p class="text-sm font-semibold">Search engine</p>
+                <p class="text-xs text-muted-foreground mt-0.5">Used for plain-text queries</p>
+              </div>
+              <div class="flex items-center gap-1 text-sm text-muted-foreground">
+                DuckDuckGo<iconify-icon icon="ph:caret-down" width="16" height="16"></iconify-icon>
+              </div>
+            </div>
+            <div class="flex items-center gap-3 p-4">
+              <div class="flex-1">
+                <p class="text-sm font-semibold">Desktop mode</p>
+                <p class="text-xs text-muted-foreground mt-0.5">Request full websites</p>
+              </div>
+              <div class="w-11 h-6 rounded-full bg-muted relative">
+                <span
+                  class="absolute left-0.5 top-0.5 size-5 rounded-full bg-card shadow-none"
+                ></span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="px-5 mt-6">
+          <p class="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2 px-1">
+            Downloads
+          </p>
+          <div class="bg-card border border-border rounded-2xl divide-y divide-border">
+            <div class="flex items-center gap-3 p-4">
+              <div class="flex-1">
+                <p class="text-sm font-semibold">Save location</p>
+                <p class="text-xs text-muted-foreground mt-0.5">Internal storage / Linky</p>
+              </div>
+              <iconify-icon
+                icon="ph:caret-right"
+                class="text-muted-foreground"
+                width="16"
+                height="16"
+              ></iconify-icon>
+            </div>
+            <div class="flex items-center gap-3 p-4">
+              <div class="flex-1">
+                <p class="text-sm font-semibold">Parallel downloads</p>
+                <p class="text-xs text-muted-foreground mt-0.5">Files transferring at once</p>
+              </div>
+              <div class="flex items-center gap-1 text-sm text-muted-foreground">
+                3<iconify-icon icon="ph:caret-down" width="16" height="16"></iconify-icon>
+              </div>
+            </div>
+            <div class="flex items-center gap-3 p-4">
+              <div class="flex-1">
+                <p class="text-sm font-semibold">Wi-Fi only</p>
+                <p class="text-xs text-muted-foreground mt-0.5">Pause transfers on mobile data</p>
+              </div>
+              <div class="w-11 h-6 rounded-full bg-primary relative">
+                <span class="absolute right-0.5 top-0.5 size-5 rounded-full bg-white"></span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="px-5 mt-6">
+          <p class="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2 px-1">
+            Detection
+          </p>
+          <div class="bg-card border border-border rounded-2xl divide-y divide-border">
+            <div class="flex items-center gap-3 p-4">
+              <div class="flex-1">
+                <p class="text-sm font-semibold">Auto-detect on paste</p>
+                <p class="text-xs text-muted-foreground mt-0.5">
+                  Scan links as soon as they arrive
+                </p>
+              </div>
+              <div class="w-11 h-6 rounded-full bg-primary relative">
+                <span class="absolute right-0.5 top-0.5 size-5 rounded-full bg-white"></span>
+              </div>
+            </div>
+            <div class="flex items-center gap-3 p-4">
+              <div class="flex-1">
+                <p class="text-sm font-semibold">Preferred quality</p>
+                <p class="text-xs text-muted-foreground mt-0.5">Default selection in results</p>
+              </div>
+              <div class="flex items-center gap-1 text-sm text-muted-foreground">
+                1080p<iconify-icon icon="ph:caret-down" width="16" height="16"></iconify-icon>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="px-5 mt-6">
+          <p class="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2 px-1">
+            Privacy
+          </p>
+          <div class="bg-card border border-border rounded-2xl divide-y divide-border">
+            <div class="flex items-center gap-3 p-4">
+              <div class="flex-1">
+                <p class="text-sm font-semibold">Save browsing history</p>
+                <p class="text-xs text-muted-foreground mt-0.5">Keep visits for 90 days</p>
+              </div>
+              <div class="w-11 h-6 rounded-full bg-primary relative">
+                <span class="absolute right-0.5 top-0.5 size-5 rounded-full bg-white"></span>
+              </div>
+            </div>
+            <div class="flex items-center gap-3 p-4">
+              <div class="flex-1">
+                <p class="text-sm font-semibold">Clear browsing data</p>
+                <p class="text-xs text-muted-foreground mt-0.5">Cookies, cache and history</p>
+              </div>
+              <iconify-icon
+                icon="ph:caret-right"
+                class="text-muted-foreground"
+                width="16"
+                height="16"
+              ></iconify-icon>
+            </div>
+          </div>
+        </div>
+        <div class="px-5 mt-6">
+          <p class="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2 px-1">
+            Advanced
+          </p>
+          <div class="bg-card border border-border rounded-2xl divide-y divide-border">
+            <div class="flex items-center gap-3 p-4">
+              <div class="flex-1">
+                <p class="text-sm font-semibold">Verify file integrity</p>
+                <p class="text-xs text-muted-foreground mt-0.5">Checksum after each download</p>
+              </div>
+              <div class="w-11 h-6 rounded-full bg-muted relative">
+                <span class="absolute left-0.5 top-0.5 size-5 rounded-full bg-card"></span>
+              </div>
+            </div>
+            <div class="flex items-center gap-3 p-4">
+              <div class="flex-1">
+                <p class="text-sm font-semibold text-destructive">Reset all settings</p>
+                <p class="text-xs text-muted-foreground mt-0.5">Keeps your library and downloads</p>
+              </div>
+              <iconify-icon
+                icon="ph:arrow-counter-clockwise"
+                class="text-destructive"
+                width="16"
+                height="16"
+              ></iconify-icon>
+            </div>
+          </div>
+          <p class="text-xs text-muted-foreground text-center mt-6">Linky 2.4.0 · Build 318</p>
+        </div>
+      </div>
+      <nav class="fixed bottom-0 left-0 right-0 bg-card border-t border-border px-2 pt-2 pb-6 flex">
+        <div class="flex-1 flex flex-col items-center gap-1 text-muted-foreground">
+          <iconify-icon icon="ph:house" width="24" height="24"></iconify-icon
+          ><span class="text-[11px] font-medium">Home</span>
+        </div>
+        <div class="flex-1 flex flex-col items-center gap-1 text-muted-foreground">
+          <iconify-icon icon="ph:download-simple" width="24" height="24"></iconify-icon
+          ><span class="text-[11px] font-medium">Downloads</span>
+        </div>
+        <div class="flex-1 flex flex-col items-center gap-1 text-muted-foreground">
+          <iconify-icon icon="ph:folder-simple" width="24" height="24"></iconify-icon
+          ><span class="text-[11px] font-medium">Library</span>
+        </div>
+        <div class="flex-1 flex flex-col items-center gap-1 text-primary">
+          <iconify-icon icon="ph:gear-fill" width="24" height="24"></iconify-icon
+          ><span class="text-[11px] font-semibold">Settings</span>
+        </div>
+      </nav>
+    </div>
+  </body>
+</html>
