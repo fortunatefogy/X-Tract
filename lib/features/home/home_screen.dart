@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -9,7 +8,6 @@ import '../../services/history_service.dart';
 import '../../services/media_extractor.dart';
 import '../../services/platform_extractor.dart';
 import '../../services/settings_service.dart';
-import '../../services/shared_link_channel.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/app_ui.dart';
 import '../../widgets/media_thumbnail.dart';
@@ -29,7 +27,6 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   final _urlController = TextEditingController();
   final _extractor = MediaExtractor();
-  final _sharing = SharedLinkChannel();
   final Set<String> _selectedGroups = {};
   final Map<String, MediaItem> _chosenQuality = {};
   List<MediaItem> _media = [];
@@ -40,10 +37,6 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    _sharing.onSharedText = _handleSharedText;
-    _sharing.getInitialText().then((text) {
-      if (text != null) _handleSharedText(text);
-    });
     HistoryService.instance.addListener(_refresh);
     BookmarksService.instance.addListener(_refresh);
   }
@@ -58,56 +51,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _refresh() {
     if (mounted) setState(() {});
-  }
-
-  Future<void> _handleSharedText(String text) async {
-    var payload = text;
-    String? autoQuality;
-    if (kDebugMode) {
-      final browserMarker = RegExp(
-        r'^\s*LINKY_OPEN_BROWSER\s+',
-        caseSensitive: false,
-      ).firstMatch(payload);
-      if (browserMarker != null) {
-        final url = payload.substring(browserMarker.end).trim();
-        if (url.isNotEmpty && mounted) {
-          Navigator.of(context).push(
-            MaterialPageRoute<void>(
-              builder: (_) => MediaBrowserScreen(initialUrl: url),
-            ),
-          );
-        }
-        return;
-      }
-      final marker = RegExp(
-        r'^\s*LINKY_AUTO_DOWNLOAD(?:_([A-Za-z0-9]+))?\s+',
-        caseSensitive: false,
-      ).firstMatch(payload);
-      if (marker != null) {
-        autoQuality = marker.group(1) ?? 'best';
-        payload = payload.substring(marker.end);
-      }
-    }
-    final urls = _extractUrls(payload);
-    if (urls.isEmpty) return;
-    _urlController.text = urls.join('\n');
-    await _extract();
-    if (autoQuality != null && mounted) await _autoDownload(autoQuality);
-  }
-
-  Future<void> _autoDownload(String quality) async {
-    final groups =
-        _groups().where((group) => group.downloadable).toList(growable: false);
-    if (groups.isEmpty) return;
-    for (final group in groups.take(1)) {
-      final item = _pickQuality(group, quality) ?? group.defaultItem;
-      try {
-        await DownloadService.instance.enqueue(item);
-        debugPrint('linky-debug: queued ${item.title}');
-      } catch (error) {
-        debugPrint('linky-debug: queue failed $error');
-      }
-    }
   }
 
   List<String> _extractUrls(String text) {
@@ -277,21 +220,6 @@ class _HomeScreenState extends State<HomeScreen> {
     if (size != 0) return size;
     return (a.qualityLabel ?? a.title ?? '')
         .compareTo(b.qualityLabel ?? b.title ?? '');
-  }
-
-  MediaItem? _pickQuality(_MediaGroup group, String quality) {
-    final wanted = quality.toLowerCase();
-    if (wanted == 'best' || wanted.isEmpty) return group.defaultItem;
-    for (final item in group.items) {
-      final label = item.qualityLabel?.toLowerCase();
-      if (label == null) continue;
-      if (label == wanted ||
-          label.startsWith(wanted) ||
-          label == '${wanted}p') {
-        return item;
-      }
-    }
-    return null;
   }
 
   String _optionLabel(MediaItem item) {

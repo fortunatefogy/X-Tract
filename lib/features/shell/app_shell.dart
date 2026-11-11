@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../services/shell_navigation.dart';
 import '../../theme/app_theme.dart';
 import '../downloads/downloads_screen.dart';
 import '../home/home_screen.dart';
@@ -15,6 +16,25 @@ class AppShell extends StatefulWidget {
 
 class _AppShellState extends State<AppShell> {
   int _index = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    ShellNavigation.instance.requestedTab.addListener(_handleRequestedTab);
+  }
+
+  @override
+  void dispose() {
+    ShellNavigation.instance.requestedTab.removeListener(_handleRequestedTab);
+    super.dispose();
+  }
+
+  void _handleRequestedTab() {
+    final requested = ShellNavigation.instance.requestedTab.value;
+    if (requested == null || !mounted) return;
+    ShellNavigation.instance.consume();
+    setState(() => _index = requested);
+  }
 
   void _openTab(int index) {
     if (index == _index) return;

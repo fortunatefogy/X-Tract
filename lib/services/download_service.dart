@@ -13,6 +13,7 @@ import 'dash_downloader.dart';
 import 'device_resources.dart';
 import 'hls_downloader.dart';
 import 'media_downloader.dart';
+import 'notification_service.dart';
 import 'platform_extractor.dart';
 import 'post_processor.dart';
 import 'settings_service.dart';
@@ -902,6 +903,7 @@ class DownloadService extends ChangeNotifier {
       );
       _notify(force: true);
       _schedulePersist();
+      unawaited(NotificationService.downloadComplete(current.title));
     } on HlsCanceled {
       final current = _records[id];
       if (current != null) {
@@ -997,6 +999,7 @@ class DownloadService extends ChangeNotifier {
       );
       _notify(force: true);
       _schedulePersist();
+      unawaited(NotificationService.downloadComplete(current.title));
     } on DashCanceled {
       final current = _records[id];
       if (current != null) {
@@ -1087,6 +1090,7 @@ class DownloadService extends ChangeNotifier {
       );
       _notify(force: true);
       _schedulePersist();
+      unawaited(NotificationService.downloadComplete(current.title));
     } on ChunkedDownloadCanceled {
       final current = _records[id];
       if (current != null) {
@@ -1170,6 +1174,7 @@ class DownloadService extends ChangeNotifier {
         error: post.$2,
         fallbackAttempted: true,
       );
+      unawaited(NotificationService.downloadComplete(current.title));
     } catch (error) {
       if (_records[record.taskId]?.state == DownloadState.canceled) return;
       _records[record.taskId] = current.copyWith(

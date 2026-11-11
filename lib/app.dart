@@ -1,11 +1,18 @@
 import 'package:flutter/material.dart';
 
-import 'features/shell/app_shell.dart';
+import 'features/share/share_host.dart';
 import 'services/settings_service.dart';
 import 'theme/app_theme.dart';
 
 class LinkyApp extends StatelessWidget {
-  const LinkyApp({super.key});
+  const LinkyApp({
+    super.key,
+    this.startInShareMode = false,
+    this.initialShareText,
+  });
+
+  final bool startInShareMode;
+  final String? initialShareText;
 
   @override
   Widget build(BuildContext context) {
@@ -18,7 +25,10 @@ class LinkyApp extends StatelessWidget {
         themeMode: settings.themeMode,
         theme: AppTheme.light,
         darkTheme: AppTheme.dark,
-        home: const AppShell(),
+        home: ShareHost(
+          startInShareMode: startInShareMode,
+          initialText: initialShareText,
+        ),
       ),
     );
   }
