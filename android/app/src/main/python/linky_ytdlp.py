@@ -220,6 +220,8 @@ def _encoded_height(url):
 _X_HOSTS = ("x.com", "twitter.com", "mobile.twitter.com", "mobile.x.com")
 _INSTAGRAM_HOSTS = ("instagram.com", "www.instagram.com")
 
+_last_extract_error = ""
+
 _IMAGE_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -253,6 +255,14 @@ _REDDIT_HEADERS = {
     "Accept": "*/*",
 }
 
+_REDDIT_POST_HOSTS = (
+    "reddit.com",
+    "www.reddit.com",
+    "old.reddit.com",
+    "m.reddit.com",
+    "np.reddit.com",
+)
+
 
 def _reddit_video_id(raw_url):
     parsed = urlparse(raw_url)
@@ -266,6 +276,12 @@ def _fetch_bytes(url, headers, timeout=20):
     request = urllib.request.Request(url, headers=headers)
     with urllib.request.urlopen(request, timeout=timeout) as response:
         return response.read()
+
+
+def _fetch_with_final_url(url, headers, timeout=20):
+    request = urllib.request.Request(url, headers=headers)
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return response.read(), response.geturl()
 
 
 def _reddit_dash_items(raw_url):
@@ -353,6 +369,358 @@ def _reddit_dash_items(raw_url):
             item["audio_url"] = audio_url
             item["audio_mime_type"] = "audio/mp4"
         items.append(item)
+    return items
+
+
+def _reddit_json_url(raw_url):
+    parsed = urlparse(raw_url)
+    path = parsed.path.rstrip("/")
+    if path.startswith("/gallery/"):
+        gallery_id = path.split("/")[-1]
+        return f"https://www.reddit.com/comments/{gallery_id}.json?raw_json=1"
+    if path.endswith(".json"):
+        path = path[:-5]
+    url = f"https://www.reddit.com{path}.json?raw_json=1"
+    if parsed.query:
+        url += f"&{parsed.query}"
+    return url
+
+
+def _cookie_header_for(cookie_text, host):
+    if not cookie_text:
+        return None
+    pairs = []
+    for line in cookie_text.splitlines():
+        if not line:
+            continue
+        if line.startswith("#HttpOnly_"):
+            line = line[len("#HttpOnly_") :]
+        elif line.startswith("#"):
+            continue
+        parts = line.split("\t")
+        if len(parts) < 7:
+            continue
+        domain = parts[0].lstrip(".").lower()
+        if not (host == domain or host.endswith("." + domain)):
+            continue
+        pairs.append(f"{parts[5]}={parts[6]}")
+    return "; ".join(pairs) if pairs else None
+
+
+def _reddit_post_id(raw_url):
+    match = re.search(
+        r"/(?:comments|gallery)/([A-Za-z0-9]+)",
+        urlparse(raw_url).path,
+    )
+    return match.group(1) if match else None
+
+
+def _reddit_resolve_post(post):
+    if not isinstance(post, dict):
+        return None
+    crossposts = post.get("crosspost_parent_list") or []
+    if crossposts and not post.get("is_gallery"):
+        parent = crossposts[0]
+        if isinstance(parent, dict):
+            return parent
+    return post
+
+
+def _reddit_resolve_url(raw_url):
+    if _reddit_post_id(raw_url):
+        return raw_url
+    separator = "&" if "?" in raw_url else "?"
+    candidates = [
+        raw_url,
+        f"{raw_url}{separator}json=1",
+        f"{raw_url}{separator}raw_json=1",
+    ]
+    for candidate in candidates:
+        for method in ("HEAD", "GET"):
+            try:
+                request = urllib.request.Request(
+                    candidate, headers=_REDDIT_HEADERS, method=method
+                )
+                with urllib.request.urlopen(request, timeout=15) as response:
+                    final_url = response.geturl()
+                    if _reddit_post_id(final_url):
+                        return final_url
+            except Exception as error:
+                final_url = ""
+                geturl = getattr(error, "geturl", None)
+                if callable(geturl):
+                    try:
+                        final_url = geturl() or ""
+                    except Exception:
+                        final_url = ""
+                if _reddit_post_id(final_url):
+                    return final_url
+                response_headers = getattr(error, "headers", None)
+                location = (
+                    response_headers.get("Location")
+                    if response_headers is not None
+                    else None
+                )
+                if location:
+                    location_url = urljoin(candidate, location)
+                    if _reddit_post_id(location_url):
+                        return location_url
+    return None
+
+
+def _reddit_post_data(raw_url, cookie_text="", forced_post_id=""):
+    headers = dict(_REDDIT_HEADERS)
+    headers["Accept"] = "application/json"
+    cookie = _cookie_header_for(cookie_text, "reddit.com")
+    if cookie:
+        headers["Cookie"] = cookie
+    post_id = forced_post_id or _reddit_post_id(raw_url)
+    resolved_url = raw_url
+    if not post_id:
+        resolved = _reddit_resolve_url(raw_url)
+        if resolved:
+            resolved_url = resolved
+            post_id = _reddit_post_id(resolved)
+
+    if post_id:
+        try:
+            raw = _fetch_bytes(_reddit_json_url(resolved_url), headers)
+            data = json.loads(raw.decode("utf-8", "ignore"))
+            if isinstance(data, list):
+                data = data[0] if data else {}
+            if isinstance(data, dict):
+                children = (data.get("data") or {}).get("children") or []
+                if children and isinstance(children[0], dict):
+                    post = _reddit_resolve_post(children[0].get("data"))
+                    if post:
+                        return post
+        except Exception:
+            pass
+
+    if not post_id:
+        return None
+    try:
+        archive_url = (
+            "https://arctic-shift.photon-reddit.com/api/posts/ids"
+            f"?ids={post_id}"
+        )
+        archive_headers = {
+            "User-Agent": _REDDIT_HEADERS["User-Agent"],
+            "Accept": "application/json",
+        }
+        raw = _fetch_bytes(archive_url, archive_headers)
+        data = json.loads(raw.decode("utf-8", "ignore"))
+        posts = data.get("data") if isinstance(data, dict) else data
+        if isinstance(posts, list) and posts:
+            return _reddit_resolve_post(posts[0])
+    except Exception:
+        pass
+    return None
+
+
+def _reddit_direct_url(url):
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower()
+    if host in ("preview.redd.it", "external-preview.redd.it"):
+        name = parsed.path.strip("/").split("/")[-1]
+        if name:
+            return f"https://i.redd.it/{name}"
+    return url
+
+
+def _reddit_media_item(
+    source_page,
+    url,
+    kind,
+    title,
+    label,
+    index,
+    uploader,
+    media_id,
+    width=None,
+    height=None,
+):
+    if not isinstance(url, str) or not url.startswith(("http://", "https://")):
+        return None
+    headers = dict(_REDDIT_HEADERS)
+    headers["Referer"] = "https://www.reddit.com/"
+    is_video = kind == "video"
+    return {
+        "url": url,
+        "type": kind,
+        "title": f"{title} · {label}"[:300],
+        "group_title": title,
+        "quality_label": "Video" if is_video else "Image",
+        "mime_type": "video/mp4" if is_video else _image_mime(url),
+        "thumbnail": None,
+        "source_page": source_page,
+        "size": None,
+        "width": width,
+        "height": height,
+        "duration": None,
+        "uploader": uploader,
+        "format_id": f"reddit-{media_id or index}",
+        "found_in": "Reddit gallery",
+        "request_headers": headers,
+        "requires_extractor": False,
+        "is_downloadable": True,
+    }
+
+
+def _reddit_json_items(raw_url, cookie_text="", forced_post_id=""):
+    try:
+        post = _reddit_post_data(raw_url, cookie_text, forced_post_id)
+    except Exception:
+        return []
+    if not post:
+        return []
+    title = re.sub(r"\s+", " ", str(post.get("title") or "")).strip()[:160]
+    if not title:
+        title = "Reddit post"
+    uploader = post.get("author")
+    permalink = post.get("permalink")
+    source_page = (
+        f"https://www.reddit.com{permalink}"
+        if isinstance(permalink, str) and permalink.startswith("/")
+        else raw_url
+    )
+    gallery_data = post.get("gallery_data")
+    gallery = (
+        gallery_data.get("items") or []
+        if isinstance(gallery_data, dict)
+        else []
+    )
+    metadata = post.get("media_metadata")
+    if not isinstance(metadata, dict):
+        metadata = {}
+    items = []
+    index = 0
+    for entry in gallery:
+        if not isinstance(entry, dict):
+            continue
+        media_id = str(entry.get("media_id") or "")
+        meta = metadata.get(media_id)
+        if not isinstance(meta, dict):
+            continue
+        if str(meta.get("status") or "valid") != "valid":
+            continue
+        sizes = meta.get("s")
+        if not isinstance(sizes, dict):
+            sizes = {}
+        caption = re.sub(
+            r"\s+", " ", str(entry.get("caption") or "")
+        ).strip()[:80]
+        label = caption or f"Item {index + 1}"
+        width = sizes.get("x")
+        height = sizes.get("y")
+        mp4_url = sizes.get("mp4")
+        gif_url = sizes.get("gif")
+        image_url = sizes.get("u")
+        media_kind = str(meta.get("e") or "")
+        media_mime = str(meta.get("m") or "")
+        animated = media_kind == "AnimatedImage" or media_mime == "image/gif"
+        chosen_url = None
+        chosen_kind = "image"
+        if animated:
+            if isinstance(gif_url, str) and gif_url:
+                chosen_url = _reddit_direct_url(unescape(gif_url))
+            elif isinstance(mp4_url, str) and mp4_url:
+                candidate = unescape(mp4_url)
+                if "preview.redd.it" not in candidate:
+                    chosen_url = candidate
+                    chosen_kind = "video"
+        elif (
+            isinstance(mp4_url, str)
+            and mp4_url
+            and (
+                media_kind == "RedditVideo"
+                or media_mime.startswith("video/")
+                or "v.redd.it" in mp4_url
+            )
+        ):
+            chosen_url = unescape(mp4_url)
+            chosen_kind = "video"
+        elif isinstance(image_url, str) and image_url:
+            chosen_url = _reddit_direct_url(unescape(image_url))
+        elif isinstance(gif_url, str) and gif_url:
+            chosen_url = _reddit_direct_url(unescape(gif_url))
+        elif (
+            isinstance(mp4_url, str)
+            and mp4_url
+            and "preview.redd.it" not in mp4_url
+        ):
+            chosen_url = unescape(mp4_url)
+            chosen_kind = "video"
+        if chosen_url:
+            index += 1
+            item = _reddit_media_item(
+                source_page,
+                chosen_url,
+                chosen_kind,
+                title,
+                label,
+                index,
+                uploader,
+                media_id,
+                width,
+                height,
+            )
+            if item:
+                items.append(item)
+    if items:
+        return items
+
+    destination = post.get("url_overridden_by_dest") or post.get("url")
+    hint = str(post.get("post_hint") or "")
+    if isinstance(destination, str) and destination:
+        path = urlparse(destination).path.lower()
+        if hint == "image" or re.search(
+            r"\.(jpe?g|png|gif|webp|avif)$", path
+        ):
+            item = _reddit_media_item(
+                source_page,
+                destination,
+                "image",
+                title,
+                "Image",
+                1,
+                uploader,
+                post.get("id"),
+            )
+            if item:
+                items.append(item)
+
+    if not items:
+        secure_media = post.get("secure_media")
+        media = post.get("media")
+        reddit_video = None
+        if isinstance(secure_media, dict):
+            reddit_video = secure_media.get("reddit_video")
+        if not isinstance(reddit_video, dict) and isinstance(media, dict):
+            reddit_video = media.get("reddit_video")
+        if isinstance(reddit_video, dict):
+            fallback = reddit_video.get("fallback_url")
+            hls = reddit_video.get("hls_url")
+            if isinstance(fallback, str) and fallback:
+                dash_items = _reddit_dash_items(fallback)
+                if dash_items:
+                    items.extend(dash_items)
+            if not items and isinstance(hls, str) and hls:
+                item = _reddit_media_item(
+                    source_page,
+                    hls,
+                    "video",
+                    title,
+                    "Video",
+                    1,
+                    uploader,
+                    post.get("id"),
+                    reddit_video.get("width"),
+                    reddit_video.get("height"),
+                )
+                if item:
+                    item["mime_type"] = "application/vnd.apple.mpegurl"
+                    items.append(item)
     return items
 
 
@@ -1114,6 +1482,8 @@ def _write_cookie_file(cookie_text):
 
 
 def _extract_info(raw_url, cookie_path):
+    global _last_extract_error
+    _last_extract_error = ""
     options = {
         "quiet": True,
         "no_warnings": True,
@@ -1140,6 +1510,7 @@ def _extract_info(raw_url, cookie_path):
             return ydl.extract_info(raw_url, download=False)
     except Exception as error:
         message = str(error)
+        _last_extract_error = message
         if (
             "There is no video" not in message
             and "No video could be found" not in message
@@ -1187,6 +1558,26 @@ def extract(raw_url, cookie_text=""):
 
     host = (parsed.hostname or "").lower()
     is_youtube = host.endswith("youtube.com") or host == "youtu.be"
+    is_reddit = host in _REDDIT_POST_HOSTS and (
+        "/comments/" in parsed.path
+        or parsed.path.startswith("/gallery/")
+        or re.search(r"/s/[A-Za-z0-9]+", parsed.path) is not None
+    )
+
+    if host == "i.redd.it" and re.search(
+        r"\.(jpe?g|png|gif|webp|avif)$", parsed.path, re.I
+    ):
+        item = _image_item(raw_url, raw_url, "Reddit image", 1)
+        if item:
+            item["request_headers"] = {
+                **_REDDIT_HEADERS,
+                "Referer": "https://www.reddit.com/",
+            }
+            print(
+                f"linky-ytdlp: {parsed.hostname} -> 1 playable format(s)",
+                flush=True,
+            )
+            return json.dumps({"media": [item], "source": "reddit-image"})
 
     reddit_items = _reddit_dash_items(raw_url)
     if reddit_items:
@@ -1200,7 +1591,29 @@ def extract(raw_url, cookie_text=""):
     try:
         info = _extract_info(raw_url, cookie_path)
         items = _items_from_info(info, raw_url)
-        if _is_facebook_host(host):
+        if is_reddit:
+            existing_urls = {str(item.get("url")) for item in items}
+            try:
+                reddit_extra = _reddit_json_items(raw_url, cookie_text)
+            except Exception:
+                reddit_extra = []
+            if not reddit_extra:
+                match = re.search(
+                    r"\[Reddit\]\s+([A-Za-z0-9]+):", _last_extract_error
+                )
+                if match:
+                    try:
+                        reddit_extra = _reddit_json_items(
+                            raw_url, cookie_text, match.group(1)
+                        )
+                    except Exception:
+                        reddit_extra = []
+            for item in reddit_extra:
+                if item.get("url") not in existing_urls:
+                    items.append(item)
+                    existing_urls.add(str(item.get("url")))
+            items = items[:300]
+        elif _is_facebook_host(host):
             existing_urls = {str(item.get("url")) for item in items}
             extras = (
                 _facebook_items(raw_url)

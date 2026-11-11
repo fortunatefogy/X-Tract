@@ -20,10 +20,20 @@ class MediaExtractor {
   static const _maxPageBytes = 2 * 1024 * 1024;
 
   static bool skipHtmlFallback(String url) {
-    final host = Uri.tryParse(url)?.host.toLowerCase() ?? '';
-    return host == 'facebook.com' ||
+    final uri = Uri.tryParse(url);
+    final host = uri?.host.toLowerCase() ?? '';
+    if (host == 'facebook.com' ||
         host.endsWith('.facebook.com') ||
-        host == 'fb.watch';
+        host == 'fb.watch') {
+      return true;
+    }
+    if (host == 'reddit.com' ||
+        host.endsWith('.reddit.com') ||
+        host == 'redd.it' ||
+        host.endsWith('.redd.it')) {
+      return true;
+    }
+    return false;
   }
   static const _timeout = Duration(seconds: 20);
 
