@@ -1097,10 +1097,28 @@ class HlsDownloader {
     int? byteRangeOffset,
     int? byteRangeLength,
   }) async {
+    final result = await _fetchResult(
+      client,
+      uri,
+      headers,
+      byteRangeOffset: byteRangeOffset,
+      byteRangeLength: byteRangeLength,
+    );
+    return result.bytes;
+  }
+
+  Future<({Uint8List bytes, Uri uri})> _fetchResult(
+    HttpClient client,
+    Uri uri,
+    Map<String, String> headers, {
+    int? byteRangeOffset,
+    int? byteRangeLength,
+  }) async {
     final range = byteRangeOffset != null && byteRangeLength != null
         ? 'bytes=$byteRangeOffset-${byteRangeOffset + byteRangeLength - 1}'
         : null;
-    var response = await _get(client, uri, headers, range: range);
+    var (response, finalUri) =
+        await _get(client, uri, headers, range: range);
     var status = response.statusCode;
     final hasOriginHeaders = headers.keys.any((key) {
       final name = key.toLowerCase();
@@ -1114,13 +1132,14 @@ class HlsDownloader {
           final name = key.toLowerCase();
           return name == 'referer' || name == 'origin';
         });
-      response = await _get(client, uri, retryHeaders, range: range);
+      (response, finalUri) =
+          await _get(client, uri, retryHeaders, range: range);
       status = response.statusCode;
     }
     if ((status == 400 || status == 403) && headers.isNotEmpty) {
       // Last resort: retry with no forwarded browser headers at all.
       await _discard(response);
-      response = await _get(client, uri, const {}, range: range);
+      (response, finalUri) = await _get(client, uri, const {}, range: range);
       status = response.statusCode;
     }
     if (status < 200 || status >= 300) {
@@ -1141,7 +1160,7 @@ class HlsDownloader {
       if (error is HlsCanceled) rethrow;
       throw HttpException('The HLS stream could not be read: $error');
     }
-    return builder.takeBytes();
+    return (bytes: builder.takeBytes(), uri: finalUri);
   }
 
   Future<_HlsPlaylist> _loadPlaylist(
@@ -1149,9 +1168,9 @@ class HlsDownloader {
     Uri uri,
     Map<String, String> headers,
   ) async {
-    final bytes = await _fetch(client, uri, headers);
-    final text = utf8.decode(bytes, allowMalformed: true);
-    return _parsePlaylist(text, uri);
+    final result = await _fetchResult(client, uri, headers);
+    final text = utf8.decode(result.bytes, allowMalformed: true);
+    return _parsePlaylist(text, result.uri);
   }
 
   /// Resolves a playlist-relative URI. Relative segment/variant/key URLs often
@@ -1356,7 +1375,7 @@ class HlsDownloader {
     return (int.tryParse(parts[0]), int.tryParse(parts[1]));
   }
 
-  Future<HttpClientResponse> _get(
+  Future<(HttpClientResponse, Uri)> _get(
     HttpClient client,
     Uri uri,
     Map<String, String> headers, {
@@ -1385,7 +1404,7 @@ class HlsDownloader {
       }
       if (range != null) request.headers.set(HttpHeaders.rangeHeader, range);
       final response = await request.close();
-      if (!response.isRedirect) return response;
+      if (!response.isRedirect) return (response, current);
       if (redirects >= 5) {
         await _discard(response);
         throw const HttpException(

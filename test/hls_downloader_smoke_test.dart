@@ -63,4 +63,43 @@ seg2.m4s
     expect(await result.file.readAsBytes(), [1, 2, 3, 10, 11, 20, 21, 30, 31]);
     expect(progress.last, (3, 3));
   });
+
+  test('resolves segment URIs against the redirected playlist location',
+      () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final base = 'http://127.0.0.1:${server.port}';
+    server.listen((request) {
+      final path = request.uri.path;
+      if (path == '/start/index.m3u8') {
+        request.response.statusCode = HttpStatus.found;
+        request.response.headers
+            .set(HttpHeaders.locationHeader, '/cdn/index.m3u8');
+      } else if (path == '/cdn/index.m3u8') {
+        request.response.add(utf8.encode('''#EXTM3U
+#EXT-X-TARGETDURATION:4
+#EXTINF:4,
+seg0.m4s
+#EXT-X-ENDLIST
+'''));
+      } else if (path == '/cdn/seg0.m4s') {
+        request.response.add([7, 8, 9]);
+      } else {
+        request.response.statusCode = HttpStatus.notFound;
+      }
+      request.response.close();
+    });
+
+    final directory = await Directory.systemTemp.createTemp('linky-hls-test');
+    addTearDown(() async {
+      await server.close(force: true);
+      await directory.delete(recursive: true);
+    });
+    final result = await HlsDownloader(workers: 1).download(
+      url: '$base/start/index.m3u8',
+      destination: File('${directory.path}/movie.ts'),
+      workDirectory: Directory('${directory.path}/work'),
+      onProgress: (_, __) {},
+    );
+    expect(await result.file.readAsBytes(), [7, 8, 9]);
+  });
 }

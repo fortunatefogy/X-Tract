@@ -510,11 +510,11 @@ class DashDownloader {
     Uri uri,
     Map<String, String> headers,
   ) async {
-    final bytes = await _fetch(client, uri, headers);
+    final result = await _fetchResult(client, uri, headers);
     final document = XmlDocument.parse(
-      utf8.decode(bytes, allowMalformed: true),
+      utf8.decode(result.bytes, allowMalformed: true),
     );
-    return _parseMpd(document, uri);
+    return _parseMpd(document, result.uri);
   }
 
   _DashRepresentation? _byId(
@@ -1070,7 +1070,8 @@ class DashDownloader {
     if (representation.singleFile != null) {
       await destination.parent.create(recursive: true);
       final temporary = File('${destination.path}.linky-tmp');
-      final response = await _get(client, representation.singleFile!, headers);
+      final (response, _) =
+          await _get(client, representation.singleFile!, headers);
       if (response.statusCode < 200 || response.statusCode >= 300) {
         await _discard(response);
         throw HttpException(
@@ -1222,7 +1223,17 @@ class DashDownloader {
     Map<String, String> headers, {
     (int, int)? range,
   }) async {
-    final response = await _get(
+    final result = await _fetchResult(client, uri, headers, range: range);
+    return result.bytes;
+  }
+
+  Future<({Uint8List bytes, Uri uri})> _fetchResult(
+    HttpClient client,
+    Uri uri,
+    Map<String, String> headers, {
+    (int, int)? range,
+  }) async {
+    final (response, finalUri) = await _get(
       client,
       uri,
       headers,
@@ -1237,10 +1248,10 @@ class DashDownloader {
     await for (final chunk in response) {
       builder.add(chunk);
     }
-    return builder.takeBytes();
+    return (bytes: builder.takeBytes(), uri: finalUri);
   }
 
-  Future<HttpClientResponse> _get(
+  Future<(HttpClientResponse, Uri)> _get(
     HttpClient client,
     Uri uri,
     Map<String, String> headers, {
@@ -1255,7 +1266,7 @@ class DashDownloader {
       }
       if (range != null) request.headers.set(HttpHeaders.rangeHeader, range);
       final response = await request.close();
-      if (!response.isRedirect) return response;
+      if (!response.isRedirect) return (response, current);
       if (redirects >= 5) {
         await _discard(response);
         throw const HttpException(

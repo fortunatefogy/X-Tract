@@ -42,19 +42,28 @@ class SecureDnsService {
 
   Future<void> configure(HttpClient client) async {
     if (!enabled || _endpoint == null) return;
-    client.connectionFactory = (uri, proxyHost, proxyPort) {
+    client.connectionFactory = (uri, proxyHost, proxyPort) async {
+      final direct = proxyHost == null;
       final host = proxyHost ?? uri.host;
       final port = proxyPort ?? uri.port;
-      return _connect(host, port);
+      final task = await _connect(host, port);
+      // Dart only upgrades connectionFactory sockets to TLS when the request
+      // is routed through a proxy. For direct HTTPS we must do it ourselves,
+      // otherwise plain HTTP is sent to port 443 and the response fails to
+      // parse ("Invalid request method").
+      if (!direct || uri.scheme.toLowerCase() != 'https') return task;
+      return ConnectionTask.fromSocket(
+        task.socket.then(
+          (socket) => SecureSocket.secure(socket, host: uri.host),
+        ),
+        task.cancel,
+      );
     };
   }
 
   Future<ConnectionTask<Socket>> _connect(String host, int port) async {
     final address = await resolve(host);
-    if (address == null) {
-      return Socket.startConnect(host, port);
-    }
-    return Socket.startConnect(address.address, port);
+    return Socket.startConnect(address ?? host, port);
   }
 
   Future<InternetAddress?> resolve(String host) async {

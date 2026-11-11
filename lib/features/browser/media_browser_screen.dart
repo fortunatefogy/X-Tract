@@ -990,7 +990,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
             height: variant.height,
             qualityLabel: variant.label,
             foundIn: 'HLS variant',
-            sourcePage: url,
+            sourcePage: tab.url,
             requestHeaders: headers,
           );
         }
@@ -1014,7 +1014,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
             qualityLabel: representation.label,
             formatId: representation.id,
             foundIn: 'DASH representation',
-            sourcePage: url,
+            sourcePage: tab.url,
             requestHeaders: headers,
           );
         }
