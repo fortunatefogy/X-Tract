@@ -55,6 +55,7 @@ object LinkyEngine {
 
 abstract class LinkyFlutterActivity : FlutterActivity() {
     private var pendingSharedText: String? = null
+    private var pendingBrowserUrl: String? = null
     private var shareChannel: MethodChannel? = null
     private val extractorExecutor = Executors.newSingleThreadExecutor()
 
@@ -88,6 +89,8 @@ abstract class LinkyFlutterActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         pendingSharedText = sharedText(intent)
+        pendingBrowserUrl = intent?.getStringExtra("browser_url")
+        intent?.removeExtra("browser_url")
         shareChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "linky/share_intent")
         shareChannel?.setMethodCallHandler { call, result ->
             when (call.method) {
@@ -109,6 +112,27 @@ abstract class LinkyFlutterActivity : FlutterActivity() {
                 "getInitialSharedText" -> {
                     result.success(pendingSharedText)
                     pendingSharedText = null
+                }
+                "openInBrowser" -> {
+                    val url = call.argument<String>("url")
+                    if (url.isNullOrBlank()) {
+                        result.error("invalid_url", "A page URL is required.", null)
+                    } else if (supportsShare) {
+                        startActivity(
+                            Intent(this, MainActivity::class.java).apply {
+                                addFlags(
+                                    Intent.FLAG_ACTIVITY_NEW_TASK or
+                                        Intent.FLAG_ACTIVITY_SINGLE_TOP,
+                                )
+                                putExtra("browser_url", url)
+                            },
+                        )
+                        result.success(true)
+                        finish()
+                    } else {
+                        shareChannel?.invokeMethod("openBrowser", url)
+                        result.success(true)
+                    }
                 }
                 "saveToGallery" -> {
                     val path = call.argument<String>("path")
@@ -466,6 +490,9 @@ abstract class LinkyFlutterActivity : FlutterActivity() {
         announceMode()
         if (supportsShare) {
             pendingSharedText?.let { shareChannel?.invokeMethod("sharedText", it) }
+        } else {
+            pendingBrowserUrl?.let { shareChannel?.invokeMethod("openBrowser", it) }
+            pendingBrowserUrl = null
         }
     }
 
@@ -478,10 +505,16 @@ abstract class LinkyFlutterActivity : FlutterActivity() {
             pendingSharedText?.let { shareChannel?.invokeMethod("sharedText", it) }
             return
         }
+        announceMode()
+        val browserUrl = intent.getStringExtra("browser_url")
+        if (browserUrl != null) {
+            intent.removeExtra("browser_url")
+            shareChannel?.invokeMethod("openBrowser", browserUrl)
+            return
+        }
         if (intent.getBooleanExtra("open_downloads", false)) {
             shareChannel?.invokeMethod("openDownloads", true)
         }
-        announceMode()
     }
 
     protected fun isShareIntent(intent: Intent?): Boolean {

@@ -206,6 +206,8 @@ def _encoded_height(url):
     return int(match.group(1)) if match else None
 
 
+_X_HOSTS = ("x.com", "twitter.com", "mobile.twitter.com", "mobile.x.com")
+
 _IMAGE_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -776,7 +778,7 @@ def _generic_image_items(raw_url):
 
 def _image_items(raw_url):
     host = (urlparse(raw_url).hostname or "").lower()
-    if host in ("x.com", "twitter.com", "mobile.twitter.com", "mobile.x.com"):
+    if host in _X_HOSTS:
         return _x_image_items(raw_url)
     if host in ("instagram.com", "www.instagram.com"):
         return _instagram_image_items(raw_url)
@@ -872,8 +874,18 @@ def extract(raw_url, cookie_text=""):
     try:
         info = _extract_info(raw_url, cookie_path)
         items = _items_from_info(info, raw_url)
-        if not items and not is_youtube:
-            items = _image_items(raw_url)
+        if not is_youtube:
+            if not items:
+                items = _image_items(raw_url)
+            elif host in _X_HOSTS:
+                # yt-dlp returns only the video tracks for mixed X posts, so
+                # add the photos from the same post alongside them.
+                existing_urls = {str(item.get("url")) for item in items}
+                for image in _x_image_items(raw_url):
+                    if image.get("url") not in existing_urls:
+                        items.append(image)
+                        existing_urls.add(str(image.get("url")))
+                items = items[:300]
         print(
             f"linky-ytdlp: {parsed.hostname} -> {len(items)} playable format(s)",
             flush=True,

@@ -7,6 +7,7 @@ class SharedLinkChannel {
   void Function(bool shareMode)? onLaunchModeChanged;
   void Function(bool openDownloads)? onOpenDownloads;
   void Function(bool hidden)? onAppHidden;
+  void Function(String url)? onOpenBrowser;
 
   SharedLinkChannel({bool listen = false}) {
     if (!listen) return;
@@ -28,6 +29,10 @@ class SharedLinkChannel {
           if (call.arguments is bool) {
             onAppHidden?.call(call.arguments as bool);
           }
+        case 'openBrowser':
+          if (call.arguments is String) {
+            onOpenBrowser?.call(call.arguments as String);
+          }
       }
     });
   }
@@ -37,6 +42,10 @@ class SharedLinkChannel {
 
   static Future<String?> getInitialText() =>
       _channel.invokeMethod<String>('getInitialSharedText');
+
+  static Future<void> openInBrowser(String url) async {
+    await _channel.invokeMethod<bool>('openInBrowser', {'url': url});
+  }
 
   static Future<void> shareReady() async {
     try {

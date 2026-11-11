@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../services/shell_navigation.dart';
 import '../../services/shared_link_channel.dart';
+import '../browser/media_browser_screen.dart';
 import '../shell/app_shell.dart';
 import 'share_popup_screen.dart';
 
@@ -19,42 +20,27 @@ class ShareHost extends StatefulWidget {
   State<ShareHost> createState() => _ShareHostState();
 }
 
-class _ShareHostState extends State<ShareHost> with WidgetsBindingObserver {
+class _ShareHostState extends State<ShareHost> {
   late final SharedLinkChannel _channel;
   late bool _shareMode = widget.startInShareMode;
   late String? _text = widget.initialText;
-  bool _minimizedAfterDownload = false;
   bool _hidden = false;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this);
     _channel = SharedLinkChannel(listen: true);
     _channel.onSharedText = _handleSharedText;
     _channel.onLaunchModeChanged = _handleLaunchModeChanged;
     _channel.onOpenDownloads = _handleOpenDownloads;
     _channel.onAppHidden = _handleAppHidden;
+    _channel.onOpenBrowser = _handleOpenBrowser;
     if (_shareMode) _notifyReady();
   }
 
   @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
     super.dispose();
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state != AppLifecycleState.resumed || !_shareMode) return;
-    if (_minimizedAfterDownload) {
-      setState(() {
-        _minimizedAfterDownload = false;
-        _shareMode = false;
-      });
-      return;
-    }
-    _notifyReady();
   }
 
   void _notifyReady() {
@@ -77,13 +63,11 @@ class _ShareHostState extends State<ShareHost> with WidgetsBindingObserver {
     if (!mounted) return;
     if (shareMode && _shareMode) {
       if (_hidden) setState(() => _hidden = false);
-      _notifyReady();
       return;
     }
     setState(() {
       _shareMode = shareMode;
       _hidden = false;
-      _minimizedAfterDownload = false;
     });
     if (shareMode) _notifyReady();
   }
@@ -99,12 +83,35 @@ class _ShareHostState extends State<ShareHost> with WidgetsBindingObserver {
     ShellNavigation.instance.openTab(1);
   }
 
+  void _handleOpenBrowser(String url) {
+    if (!mounted) return;
+    setState(() {
+      _shareMode = false;
+      _hidden = false;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => MediaBrowserScreen(initialUrl: url),
+        ),
+      );
+    });
+  }
+
+  Future<void> _openBrowserFromSheet(String url) async {
+    try {
+      await SharedLinkChannel.openInBrowser(url);
+    } catch (_) {
+      _handleOpenBrowser(url);
+    }
+  }
+
   Future<void> _closePopup() async {
     await SharedLinkChannel.closePopup();
   }
 
   Future<void> _minimizeAfterDownload(int _) async {
-    setState(() => _minimizedAfterDownload = true);
     await SharedLinkChannel.minimizePopup();
   }
 
@@ -123,6 +130,7 @@ class _ShareHostState extends State<ShareHost> with WidgetsBindingObserver {
         initialText: _text,
         onClose: _closePopup,
         onDownloadQueued: _minimizeAfterDownload,
+        onOpenBrowser: _openBrowserFromSheet,
       ),
     );
   }

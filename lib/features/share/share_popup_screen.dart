@@ -14,12 +14,14 @@ class SharePopupScreen extends StatefulWidget {
     required this.initialText,
     required this.onClose,
     required this.onDownloadQueued,
+    this.onOpenBrowser,
     this.embedded = false,
   });
 
   final String? initialText;
   final VoidCallback onClose;
   final ValueChanged<int> onDownloadQueued;
+  final ValueChanged<String>? onOpenBrowser;
   final bool embedded;
 
   @override
@@ -124,10 +126,27 @@ class _SharePopupScreenState extends State<SharePopupScreen>
       _selected.addAll(items.where((item) => item.isDownloadable).map(_key));
       if (items.isEmpty) {
         _error = failed == urls.length
-            ? 'Could not inspect this link. Check the connection and try again.'
-            : 'No downloadable media was found on this page.';
+            ? 'Could not inspect this link. Open it in the Linky browser to sign in, then try again.'
+            : 'No downloadable media was found. Open it in the Linky browser to sign in, then try again.';
+      } else if (items.every((item) => !item.isDownloadable)) {
+        _error =
+            'This media needs a login the sheet cannot use. Open it in the Linky browser, sign in, then download.';
       }
     });
+  }
+
+  String? get _primaryUrl {
+    final urls = _extractUrls(widget.initialText ?? '');
+    return urls.isEmpty ? null : urls.first;
+  }
+
+  void _openBrowser() {
+    final url = _primaryUrl;
+    if (url == null) return;
+    final callback = widget.onOpenBrowser;
+    if (callback != null) {
+      callback(url);
+    }
   }
 
   String _key(MediaItem item) => '${item.url}|${item.formatId ?? ''}';
@@ -256,7 +275,7 @@ class _SharePopupScreenState extends State<SharePopupScreen>
               padding: EdgeInsets.symmetric(vertical: 36),
               child: CircularProgressIndicator(),
             )
-          else if (_error != null)
+          else if (_error != null && _media.isEmpty)
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
               child: Column(
@@ -271,14 +290,64 @@ class _SharePopupScreenState extends State<SharePopupScreen>
                     style: AppText.body(13, color: palette.mutedForeground),
                   ),
                   const SizedBox(height: 8),
-                  TextButton(
-                    onPressed: _scan,
-                    child: const Text('Scan again'),
+                  Wrap(
+                    spacing: 8,
+                    alignment: WrapAlignment.center,
+                    children: [
+                      TextButton(
+                        onPressed: _scan,
+                        child: const Text('Scan again'),
+                      ),
+                      if (_primaryUrl != null && widget.onOpenBrowser != null)
+                        FilledButton.tonalIcon(
+                          onPressed: _openBrowser,
+                          icon: const Icon(Icons.public_rounded, size: 18),
+                          label: const Text('Open in Linky browser'),
+                        ),
+                    ],
                   ),
                 ],
               ),
             )
           else ...[
+            if (_error != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(18, 0, 18, 8),
+                child: Container(
+                  padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+                  decoration: BoxDecoration(
+                    color: AppColors.amber.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(AppRadius.inner),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.info_outline_rounded,
+                          color: AppColors.amber, size: 18),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          _error!,
+                          style: AppText.body(11,
+                              color: palette.mutedForeground),
+                        ),
+                      ),
+                      if (_primaryUrl != null &&
+                          widget.onOpenBrowser != null)
+                        TextButton(
+                          onPressed: _openBrowser,
+                          style: TextButton.styleFrom(
+                            padding:
+                                const EdgeInsets.symmetric(horizontal: 8),
+                            minimumSize: const Size(0, 32),
+                            tapTargetSize:
+                                MaterialTapTargetSize.shrinkWrap,
+                          ),
+                          child: const Text('Browser'),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 0, 12, 4),
               child: Row(
