@@ -108,7 +108,9 @@ class _SharePopupScreenState extends State<SharePopupScreen>
             extracted = await platform.extract(url, cookieText: cookieText);
           } catch (_) {}
         }
-        if (extracted.isEmpty) extracted = await _extractor.extract(url);
+        if (extracted.isEmpty && !MediaExtractor.skipHtmlFallback(url)) {
+          extracted = await _extractor.extract(url);
+        }
         for (final item in extracted) {
           if (!settings.isTypeEnabled(item.type)) continue;
           if (!settings.passesSizeThreshold(item.size)) continue;
@@ -456,6 +458,7 @@ class _SharePopupScreenState extends State<SharePopupScreen>
                 type: item.type,
                 url: item.url,
                 poster: item.thumbnail,
+                headers: item.requestHeaders,
                 size: 48,
                 fallback: Icon(
                   item.type == 'image'

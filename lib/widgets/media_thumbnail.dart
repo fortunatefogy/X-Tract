@@ -12,6 +12,7 @@ class MediaThumbnail extends StatefulWidget {
     this.url,
     this.file,
     this.poster,
+    this.headers,
     this.size = 56,
     this.fallback,
   });
@@ -20,6 +21,7 @@ class MediaThumbnail extends StatefulWidget {
   final String? url;
   final File? file;
   final String? poster;
+  final Map<String, String>? headers;
   final double size;
   final Widget? fallback;
 
@@ -91,9 +93,12 @@ class _MediaThumbnailState extends State<MediaThumbnail> {
             errorBuilder: (_, __, ___) => _placeholder(context, video: false)));
       }
       if (url != null && url.isNotEmpty) {
-        return _image(Image.network(url,
-            fit: BoxFit.cover,
-            errorBuilder: (_, __, ___) => _placeholder(context, video: false)));
+        return _image(Image.network(
+          url,
+          headers: widget.headers,
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => _placeholder(context, video: false),
+        ));
       }
     }
 
@@ -101,9 +106,12 @@ class _MediaThumbnailState extends State<MediaThumbnail> {
       final poster = widget.poster;
       if (poster != null && poster.isNotEmpty) {
         return _image(
-          Image.network(poster,
-              fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) => _placeholder(context, video: true)),
+          Image.network(
+            poster,
+            headers: widget.headers,
+            fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) => _placeholder(context, video: true),
+          ),
           video: true,
         );
       }

@@ -39,6 +39,8 @@ _DIRECT_EXTENSIONS = {
 
 # Android can play these in ExoPlayer and MediaMuxer can write the container
 # without re-encoding. Anything else (HLS/DASH manifests, DRM) is skipped.
+_IMAGE_EXTENSIONS = {"jpg", "jpeg", "png", "webp", "gif", "avif", "heic", "heif"}
+
 _MP4_VIDEO_CODECS = ("avc1", "h264", "hev1", "hvc1")
 _WEBM_VIDEO_CODECS = ("vp9", "vp09", "vp8")
 _MP4_AUDIO_CODECS = ("mp4a", "aac")
@@ -110,6 +112,15 @@ def _codec_name(fmt, field):
 
 def _is_combined(fmt):
     return _codec_name(fmt, "vcodec") and _codec_name(fmt, "acodec")
+
+
+def _has_av_stream(info):
+    if _codec_name(info, "vcodec") or _codec_name(info, "acodec"):
+        return True
+    for fmt in info.get("formats") or []:
+        if _codec_name(fmt, "vcodec") or _codec_name(fmt, "acodec"):
+            return True
+    return False
 
 
 def _mux_container(video_codec, audio_codec):
@@ -207,6 +218,7 @@ def _encoded_height(url):
 
 
 _X_HOSTS = ("x.com", "twitter.com", "mobile.twitter.com", "mobile.x.com")
+_INSTAGRAM_HOSTS = ("instagram.com", "www.instagram.com")
 
 _IMAGE_HEADERS = {
     "User-Agent": (
@@ -220,6 +232,18 @@ _IMAGE_HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
 }
 
+
+_FACEBOOK_HEADERS = {
+    "User-Agent": "Twitterbot/1.0",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+
+_FACEBOOK_CRAWLER_HEADERS = {
+    "User-Agent": "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+}
 
 _REDDIT_HEADERS = {
     "User-Agent": (
@@ -517,6 +541,29 @@ def _extract_items(info, raw_url):
         )
     results.extend(audio_options)
 
+    if not results and not _has_av_stream(info):
+        page_host = (urlparse(source_page).hostname or "").lower()
+        raw_host = (urlparse(raw_url).hostname or "").lower()
+        if page_host in _INSTAGRAM_HOSTS or raw_host in _INSTAGRAM_HOSTS:
+            image_url = None
+            thumbnails = info.get("thumbnails") or []
+            if thumbnails:
+                image_url = thumbnails[-1].get("url")
+            if not image_url:
+                candidate = info.get("url")
+                extension = str(info.get("ext") or "").lower()
+                mime_type = str(info.get("mime_type") or "").lower()
+                if isinstance(candidate, str) and (
+                    extension in _IMAGE_EXTENSIONS
+                    or mime_type.startswith("image/")
+                ):
+                    image_url = candidate
+            item = _thumbnail_image_item(
+                source_page, image_url, title, 1, uploader
+            )
+            if item:
+                results.append(item)
+
     if not results and isinstance(info.get("url"), str):
         media_url = str(info["url"])
         vcodec = _codec_name(info, "vcodec")
@@ -579,6 +626,30 @@ def _image_item(raw_url, url, title, index, width=None, height=None):
         "height": height,
         "duration": None,
         "uploader": None,
+        "format_id": f"image-{index}",
+        "found_in": "post images",
+        "request_headers": dict(_IMAGE_HEADERS),
+        "requires_extractor": False,
+        "is_downloadable": True,
+    }
+
+
+def _thumbnail_image_item(raw_url, url, title, index, uploader=None):
+    if not isinstance(url, str) or not url.startswith(("http://", "https://")):
+        return None
+    return {
+        "url": url,
+        "type": "image",
+        "title": title[:300],
+        "quality_label": "Image",
+        "mime_type": _image_mime(url),
+        "thumbnail": None,
+        "source_page": raw_url,
+        "size": None,
+        "width": None,
+        "height": None,
+        "duration": None,
+        "uploader": uploader,
         "format_id": f"image-{index}",
         "found_in": "post images",
         "request_headers": dict(_IMAGE_HEADERS),
@@ -776,8 +847,254 @@ def _generic_image_items(raw_url):
     return results
 
 
+def _is_facebook_host(host):
+    return (
+        host == "facebook.com"
+        or host.endswith(".facebook.com")
+        or host == "fb.watch"
+    )
+
+
+def _is_facebook_video_url(raw_url):
+    return bool(
+        re.search(
+            r"/videos?/|/watch/?\?v=|/reel/|/share/v/|fb\.watch",
+            raw_url,
+            re.I,
+        )
+    )
+
+
+def _facebook_title(raw_url):
+    parts = [part for part in urlparse(raw_url).path.split("/") if part]
+    if len(parts) >= 2 and parts[-1].isdigit():
+        slug = parts[-2]
+    elif parts:
+        slug = parts[-1]
+    else:
+        slug = ""
+    title = re.sub(r"[-_]+", " ", slug).strip().title()
+    return (title or "Facebook video")[:160]
+
+
+def _facebook_video_items(raw_url):
+    if not _is_facebook_video_url(raw_url):
+        return []
+    embed_url = (
+        "https://www.facebook.com/plugins/video.php?href="
+        + quote(raw_url, safe="")
+        + "&show_text=false&width=720"
+    )
+    try:
+        page = _fetch_bytes(embed_url, _FACEBOOK_HEADERS).decode("utf-8", "ignore")
+    except Exception:
+        return []
+    page = unescape(page).replace("\\/", "/")
+    title = _facebook_title(raw_url)
+    thumbnail = None
+    thumb_match = re.search(
+        r'"(?:thumbnail_url|preview_image)":"(https://scontent[^"]+)"', page
+    )
+    if thumb_match:
+        thumbnail = thumb_match.group(1).replace("\\/", "/")
+    headers = dict(_IMAGE_HEADERS)
+    headers["Referer"] = "https://www.facebook.com/"
+    results = []
+    for label, key in (("HD", "hd_src"), ("SD", "sd_src")):
+        match = re.search(rf'"{key}":"(https:[^"]+)"', page)
+        if not match:
+            continue
+        media_url = unescape(match.group(1)).replace("\\/", "/")
+        if not media_url.startswith(("http://", "https://")):
+            continue
+        if any(item["url"] == media_url for item in results):
+            continue
+        results.append(
+            {
+                "url": media_url,
+                "type": "video",
+                "title": f"{title} · {label}"[:300],
+                "group_title": title,
+                "quality_label": label,
+                "mime_type": "video/mp4",
+                "thumbnail": thumbnail,
+                "source_page": raw_url,
+                "size": None,
+                "width": None,
+                "height": None,
+                "duration": None,
+                "uploader": None,
+                "format_id": f"facebook-{key}",
+                "found_in": "facebook embed",
+                "request_headers": headers,
+                "requires_extractor": False,
+                "is_downloadable": True,
+            }
+        )
+    return results
+
+
+def _facebook_crawler_image_items(raw_url):
+    try:
+        page = _fetch_bytes(raw_url, _FACEBOOK_CRAWLER_HEADERS).decode(
+            "utf-8", "ignore"
+        )
+    except Exception:
+        return []
+    page = unescape(page).replace("\\/", "/")
+    media_ids = []
+    for marker in re.finditer(r'"all_subattachments"', page):
+        window = page[marker.start() : marker.start() + 250000]
+        for match in re.finditer(r'"id":"(\d+)","__isMedia":"Photo"', window):
+            media_id = match.group(1)
+            if media_id not in media_ids:
+                media_ids.append(media_id)
+    if not media_ids:
+        for match in re.finditer(
+            r'"photo_image":\{"uri":"https://lookaside\.fbsbx\.com/'
+            r'lookaside/crawler/media/\?media_id=(\d+)"',
+            page,
+        ):
+            media_id = match.group(1)
+            if media_id not in media_ids:
+                media_ids.append(media_id)
+    if not media_ids:
+        return []
+    title_match = re.search(
+        r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)',
+        page,
+        re.I,
+    )
+    title = (
+        re.sub(r"\s+", " ", unescape(title_match.group(1))).strip()
+        if title_match
+        else "Facebook photo"
+    )
+    title = (title or "Facebook photo")[:160]
+    headers = dict(_FACEBOOK_HEADERS)
+    headers["Referer"] = "https://www.facebook.com/"
+    results = []
+    for index, media_id in enumerate(media_ids[:20], start=1):
+        image_url = (
+            "https://lookaside.fbsbx.com/lookaside/crawler/media/"
+            f"?media_id={media_id}"
+        )
+        item = _thumbnail_image_item(
+            raw_url,
+            image_url,
+            f"{title} · Photo {index}",
+            index,
+        )
+        if item:
+            item["title"] = f"{title} · Photo {index}"[:300]
+            item["format_id"] = f"facebook-photo-{media_id}"
+            item["request_headers"] = headers
+            results.append(item)
+    return results
+
+
+def _facebook_image_items(raw_url):
+    crawler_items = _facebook_crawler_image_items(raw_url)
+    if crawler_items:
+        return crawler_items
+    urls_to_try = [
+        raw_url,
+        "https://www.facebook.com/plugins/post.php?href="
+        + quote(raw_url, safe="")
+        + "&width=500&show_text=true",
+    ]
+    page = None
+    for url in urls_to_try:
+        try:
+            page = _fetch_bytes(url, _FACEBOOK_HEADERS).decode("utf-8", "ignore")
+            if page:
+                break
+        except Exception:
+            continue
+    if not page:
+        return []
+    page = unescape(page).replace("\\/", "/")
+
+    candidates = []
+    for tag in re.findall(r"<meta\b[^>]*>", page, re.I):
+        if not re.search(
+            r'(?:property|name)=["\'](?:og:image(?::url)?|twitter:image(?::src)?)["\']',
+            tag,
+            re.I,
+        ):
+            continue
+        content = re.search(r'content=["\']([^"\']+)', tag, re.I)
+        if content:
+            candidates.append(content.group(1))
+    candidates.extend(
+        re.findall(
+            r'"image(?:_url)?":\{"uri":"(https://scontent[^"]+)"',
+            page,
+            re.I,
+        )
+    )
+    candidates.extend(
+        re.findall(r'"image_url":"(https://scontent[^"]+)"', page, re.I)
+    )
+    candidates.extend(
+        re.findall(
+            r'https://scontent[^"\'\\\s<>]+?\.(?:jpe?g|webp)'
+            r'(?:\?[^"\'\\\s<>]*)?',
+            page,
+            re.I,
+        )
+    )
+
+    title_match = re.search(
+        r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)',
+        page,
+        re.I,
+    )
+    title = re.sub(
+        r"\s+", " ", unescape(title_match.group(1))
+    ).strip() if title_match else "Facebook photo"
+    title = (title or "Facebook photo")[:160]
+
+    seen = set()
+    results = []
+    for url in candidates:
+        url = unescape(url).strip()
+        if not url.startswith(("http://", "https://")):
+            continue
+        if url in seen:
+            continue
+        seen.add(url)
+        lowered = url.lower()
+        if "static.xx.fbcdn.net" in lowered or "rsrc.php" in lowered:
+            continue
+        if lowered.split("?")[0].endswith(".png"):
+            continue
+        if "t39.30808-1" in lowered or "t15.5256-10" in lowered:
+            continue
+        item = _image_item(
+            raw_url,
+            url,
+            f"{title} · Photo {len(results) + 1}",
+            len(results) + 1,
+        )
+        if item:
+            results.append(item)
+        if len(results) >= 20:
+            break
+    return results
+
+
+def _facebook_items(raw_url):
+    items = _facebook_video_items(raw_url)
+    if not items:
+        items = _facebook_image_items(raw_url)
+    return items
+
+
 def _image_items(raw_url):
     host = (urlparse(raw_url).hostname or "").lower()
+    if _is_facebook_host(host):
+        return _facebook_image_items(raw_url)
     if host in _X_HOSTS:
         return _x_image_items(raw_url)
     if host in ("instagram.com", "www.instagram.com"):
@@ -803,6 +1120,7 @@ def _extract_info(raw_url, cookie_path):
         "noplaylist": False,
         "playlistend": 20,
         "ignoreerrors": True,
+        "ignore_no_formats_error": True,
         "skip_download": True,
         "socket_timeout": 20,
         "extractor_retries": 1,
@@ -848,10 +1166,18 @@ def _items_from_info(info, raw_url):
             item.get("source_page"),
             item.get("type"),
             item.get("quality_label"),
-            item.get("title"),
+            item.get("url") or item.get("title"),
         )
         unique.setdefault(key, item)
-    return list(unique.values())[:300]
+    result = list(unique.values())[:300]
+    photo_index = 0
+    for item in result:
+        if item.get("type") != "image":
+            continue
+        photo_index += 1
+        base = re.sub(r"^Video by ", "Photo by ", str(item.get("title") or "Photo"))
+        item["title"] = f"{base} · Photo {photo_index}"[:300]
+    return result
 
 
 def extract(raw_url, cookie_text=""):
@@ -874,7 +1200,23 @@ def extract(raw_url, cookie_text=""):
     try:
         info = _extract_info(raw_url, cookie_path)
         items = _items_from_info(info, raw_url)
-        if not is_youtube:
+        if _is_facebook_host(host):
+            existing_urls = {str(item.get("url")) for item in items}
+            extras = (
+                _facebook_items(raw_url)
+                if not items
+                else (
+                    []
+                    if _is_facebook_video_url(raw_url)
+                    else _facebook_image_items(raw_url)
+                )
+            )
+            for item in extras:
+                if item.get("url") not in existing_urls:
+                    items.append(item)
+                    existing_urls.add(str(item.get("url")))
+            items = items[:300]
+        elif not is_youtube:
             if not items:
                 items = _image_items(raw_url)
             elif host in _X_HOSTS:
