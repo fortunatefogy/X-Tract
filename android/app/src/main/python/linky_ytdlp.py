@@ -1245,7 +1245,24 @@ def _facebook_title(raw_url):
     return (title or "Facebook video")[:160]
 
 
-def _facebook_video_items(raw_url):
+def _facebook_headers(base, cookie_text=""):
+    headers = dict(base)
+    cookie = _cookie_header_for(cookie_text, "facebook.com")
+    if cookie:
+        headers["Cookie"] = cookie
+    return headers
+
+
+def _facebook_final_url(raw_url, cookie_text=""):
+    headers = _facebook_headers(_FACEBOOK_CRAWLER_HEADERS, cookie_text)
+    try:
+        _, final_url = _fetch_with_final_url(raw_url, headers)
+        return final_url or raw_url
+    except Exception:
+        return raw_url
+
+
+def _facebook_video_items(raw_url, cookie_text=""):
     if not _is_facebook_video_url(raw_url):
         return []
     embed_url = (
@@ -1254,7 +1271,9 @@ def _facebook_video_items(raw_url):
         + "&show_text=false&width=720"
     )
     try:
-        page = _fetch_bytes(embed_url, _FACEBOOK_HEADERS).decode("utf-8", "ignore")
+        page = _fetch_bytes(
+            embed_url, _facebook_headers(_FACEBOOK_HEADERS, cookie_text)
+        ).decode("utf-8", "ignore")
     except Exception:
         return []
     page = unescape(page).replace("\\/", "/")
@@ -1302,31 +1321,84 @@ def _facebook_video_items(raw_url):
     return results
 
 
-def _facebook_crawler_image_items(raw_url):
+def _json_object_at(text, start):
+    depth = 0
+    in_string = False
+    escaped = False
+    for index in range(start, len(text)):
+        character = text[index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                in_string = False
+        else:
+            if character == '"':
+                in_string = True
+            elif character == "{":
+                depth += 1
+            elif character == "}":
+                depth -= 1
+                if depth == 0:
+                    return text[start : index + 1]
+    return None
+
+
+def _facebook_crawler_image_items(raw_url, cookie_text=""):
     try:
-        page = _fetch_bytes(raw_url, _FACEBOOK_CRAWLER_HEADERS).decode(
-            "utf-8", "ignore"
-        )
+        page = _fetch_bytes(
+            raw_url,
+            _facebook_headers(_FACEBOOK_CRAWLER_HEADERS, cookie_text),
+        ).decode("utf-8", "ignore")
     except Exception:
         return []
     page = unescape(page).replace("\\/", "/")
-    media_ids = []
-    for marker in re.finditer(r'"all_subattachments"', page):
-        window = page[marker.start() : marker.start() + 250000]
-        for match in re.finditer(r'"id":"(\d+)","__isMedia":"Photo"', window):
-            media_id = match.group(1)
-            if media_id not in media_ids:
-                media_ids.append(media_id)
-    if not media_ids:
+
+    media = []
+    marker = page.find('"all_subattachments":')
+    if marker != -1:
+        brace = page.find("{", marker + len('"all_subattachments":'))
+        raw_object = _json_object_at(page, brace) if brace != -1 else None
+        if raw_object:
+            try:
+                attachment = json.loads(raw_object)
+            except Exception:
+                attachment = None
+            nodes = attachment.get("nodes") if isinstance(attachment, dict) else None
+            if isinstance(nodes, list):
+                for node in nodes:
+                    media_node = node.get("media") if isinstance(node, dict) else None
+                    if not isinstance(media_node, dict):
+                        continue
+                    if media_node.get("__isMedia") != "Photo":
+                        continue
+                    viewer = media_node.get("viewer_image")
+                    preview = media_node.get("image")
+                    image_url = None
+                    if isinstance(viewer, dict):
+                        image_url = viewer.get("uri")
+                    if not isinstance(image_url, str) or not image_url:
+                        if isinstance(preview, dict):
+                            image_url = preview.get("uri")
+                    if not isinstance(image_url, str) or not image_url:
+                        continue
+                    if any(entry[1] == image_url for entry in media):
+                        continue
+                    media.append((str(media_node.get("id") or ""), image_url))
+    if not media:
         for match in re.finditer(
-            r'"photo_image":\{"uri":"https://lookaside\.fbsbx\.com/'
-            r'lookaside/crawler/media/\?media_id=(\d+)"',
+            r'"photo_image":\{"uri":"(https://lookaside\.fbsbx\.com/[^"]+)"',
             page,
         ):
-            media_id = match.group(1)
-            if media_id not in media_ids:
-                media_ids.append(media_id)
-    if not media_ids:
+            image_url = match.group(1)
+            media_id_match = re.search(r"media_id=(\d+)", image_url)
+            media_id = media_id_match.group(1) if media_id_match else ""
+            if any(entry[1] == image_url for entry in media):
+                continue
+            media.append((media_id, image_url))
+    if not media:
         return []
     title_match = re.search(
         r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)',
@@ -1339,14 +1411,10 @@ def _facebook_crawler_image_items(raw_url):
         else "Facebook photo"
     )
     title = (title or "Facebook photo")[:160]
-    headers = dict(_FACEBOOK_HEADERS)
+    headers = _facebook_headers(_FACEBOOK_HEADERS, cookie_text)
     headers["Referer"] = "https://www.facebook.com/"
     results = []
-    for index, media_id in enumerate(media_ids[:20], start=1):
-        image_url = (
-            "https://lookaside.fbsbx.com/lookaside/crawler/media/"
-            f"?media_id={media_id}"
-        )
+    for index, (media_id, image_url) in enumerate(media[:20], start=1):
         item = _thumbnail_image_item(
             raw_url,
             image_url,
@@ -1355,16 +1423,22 @@ def _facebook_crawler_image_items(raw_url):
         )
         if item:
             item["title"] = f"{title} · Photo {index}"[:300]
-            item["format_id"] = f"facebook-photo-{media_id}"
+            item["format_id"] = f"facebook-photo-{media_id or index}"
             item["request_headers"] = headers
             results.append(item)
     return results
 
 
-def _facebook_image_items(raw_url):
-    crawler_items = _facebook_crawler_image_items(raw_url)
+def _facebook_image_items(raw_url, cookie_text=""):
+    crawler_items = _facebook_crawler_image_items(raw_url, cookie_text)
     if crawler_items:
         return crawler_items
+    final_url = _facebook_final_url(raw_url, cookie_text)
+    is_group = "/groups/" in urlparse(final_url).path
+    if is_group and not cookie_text:
+        # Group posts are not exposed to logged-out crawlers; never fall back
+        # to the group cover/profile image.
+        return []
     urls_to_try = [
         raw_url,
         "https://www.facebook.com/plugins/post.php?href="
@@ -1374,7 +1448,9 @@ def _facebook_image_items(raw_url):
     page = None
     for url in urls_to_try:
         try:
-            page = _fetch_bytes(url, _FACEBOOK_HEADERS).decode("utf-8", "ignore")
+            page = _fetch_bytes(
+                url, _facebook_headers(_FACEBOOK_HEADERS, cookie_text)
+            ).decode("utf-8", "ignore")
             if page:
                 break
         except Exception:
@@ -1384,6 +1460,7 @@ def _facebook_image_items(raw_url):
     page = unescape(page).replace("\\/", "/")
 
     candidates = []
+    meta_images = []
     for tag in re.findall(r"<meta\b[^>]*>", page, re.I):
         if not re.search(
             r'(?:property|name)=["\'](?:og:image(?::url)?|twitter:image(?::src)?)["\']',
@@ -1393,6 +1470,7 @@ def _facebook_image_items(raw_url):
             continue
         content = re.search(r'content=["\']([^"\']+)', tag, re.I)
         if content:
+            meta_images.append(content.group(1))
             candidates.append(content.group(1))
     candidates.extend(
         re.findall(
@@ -1423,11 +1501,16 @@ def _facebook_image_items(raw_url):
     ).strip() if title_match else "Facebook photo"
     title = (title or "Facebook photo")[:160]
 
+    item_headers = _facebook_headers(_FACEBOOK_HEADERS, cookie_text)
+    item_headers["Referer"] = "https://www.facebook.com/"
+    cover_url = meta_images[0] if meta_images else None
     seen = set()
     results = []
     for url in candidates:
         url = unescape(url).strip()
         if not url.startswith(("http://", "https://")):
+            continue
+        if is_group and cover_url and url == cover_url:
             continue
         if url in seen:
             continue
@@ -1446,16 +1529,87 @@ def _facebook_image_items(raw_url):
             len(results) + 1,
         )
         if item:
+            item["request_headers"] = item_headers
             results.append(item)
         if len(results) >= 20:
             break
     return results
 
 
-def _facebook_items(raw_url):
-    items = _facebook_video_items(raw_url)
+def _facebook_page_video_items(raw_url, cookie_text=""):
+    headers = _facebook_headers(_FACEBOOK_CRAWLER_HEADERS, cookie_text)
+    try:
+        raw, final_url = _fetch_with_final_url(raw_url, headers)
+        page = unescape(raw.decode("utf-8", "ignore")).replace("\\/", "/")
+    except Exception:
+        return []
+    candidates = []
+    for tag in re.findall(r"<meta\b[^>]*>", page, re.I):
+        if not re.search(
+            r'(?:property|name)=["\'](?:og:video(?::url|:secure_url)?|'
+            r'twitter:player:stream)["\']',
+            tag,
+            re.I,
+        ):
+            continue
+        content = re.search(r'content=["\']([^"\']+)', tag, re.I)
+        if not content:
+            continue
+        candidate = unescape(content.group(1))
+        if candidate.startswith(("http://", "https://")):
+            if candidate not in candidates:
+                candidates.append(candidate)
+    if not candidates:
+        return []
+    title_match = re.search(
+        r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)',
+        page,
+        re.I,
+    )
+    title = (
+        re.sub(r"\s+", " ", unescape(title_match.group(1))).strip()
+        if title_match
+        else "Facebook video"
+    )
+    title = (title or "Facebook video")[:160]
+    item_headers = _facebook_headers(_FACEBOOK_HEADERS, cookie_text)
+    item_headers["Referer"] = "https://www.facebook.com/"
+    results = []
+    for index, url in enumerate(candidates[:6], start=1):
+        if not url.startswith(("http://", "https://")):
+            continue
+        label = "HD" if index == 1 else f"Quality {index}"
+        results.append(
+            {
+                "url": url,
+                "type": "video",
+                "title": f"{title} · {label}"[:300],
+                "group_title": title,
+                "quality_label": label,
+                "mime_type": "video/mp4",
+                "thumbnail": None,
+                "source_page": final_url or raw_url,
+                "size": None,
+                "width": None,
+                "height": None,
+                "duration": None,
+                "uploader": None,
+                "format_id": f"facebook-page-video-{index}",
+                "found_in": "facebook embed",
+                "request_headers": item_headers,
+                "requires_extractor": False,
+                "is_downloadable": True,
+            }
+        )
+    return results
+
+
+def _facebook_items(raw_url, cookie_text=""):
+    items = _facebook_video_items(raw_url, cookie_text)
     if not items:
-        items = _facebook_image_items(raw_url)
+        items = _facebook_page_video_items(raw_url, cookie_text)
+    if not items:
+        items = _facebook_image_items(raw_url, cookie_text)
     return items
 
 
@@ -1493,8 +1647,8 @@ def _extract_info(raw_url, cookie_path):
         "ignore_no_formats_error": True,
         "skip_download": True,
         "socket_timeout": 20,
-        "extractor_retries": 1,
-        "retries": 1,
+        "extractor_retries": 2,
+        "retries": 2,
         "cachedir": False,
     }
     if cookie_path:
@@ -1614,16 +1768,19 @@ def extract(raw_url, cookie_text=""):
                     existing_urls.add(str(item.get("url")))
             items = items[:300]
         elif _is_facebook_host(host):
+            if items and not _is_facebook_video_url(raw_url):
+                extras = _facebook_image_items(raw_url, cookie_text)
+            else:
+                extras = _facebook_items(raw_url, cookie_text)
+            resolved_facebook = _facebook_final_url(raw_url, cookie_text)
+            if (
+                "/groups/" in urlparse(resolved_facebook).path
+                and any(entry.get("type") == "image" for entry in extras)
+            ):
+                # yt-dlp can pick an unrelated video from a group page; trust
+                # the post-specific attachments instead.
+                items = []
             existing_urls = {str(item.get("url")) for item in items}
-            extras = (
-                _facebook_items(raw_url)
-                if not items
-                else (
-                    []
-                    if _is_facebook_video_url(raw_url)
-                    else _facebook_image_items(raw_url)
-                )
-            )
             for item in extras:
                 if item.get("url") not in existing_urls:
                     items.append(item)

@@ -407,14 +407,52 @@ abstract class LinkyFlutterActivity : FlutterActivity() {
             }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "linky/notifications")
             .setMethodCallHandler { call, result ->
-                if (call.method != "downloadComplete") {
-                    result.notImplemented()
-                    return@setMethodCallHandler
-                }
-                val title = call.argument<String>("title") ?: "Media download"
                 try {
-                    showDownloadComplete(title)
-                    result.success(true)
+                    when (call.method) {
+                        "downloadProgress" -> {
+                            val taskId = call.argument<String>("taskId")
+                            if (taskId.isNullOrBlank()) {
+                                result.error(
+                                    "invalid_task",
+                                    "A download task id is required.",
+                                    null,
+                                )
+                            } else {
+                                showDownloadProgress(
+                                    taskId = taskId,
+                                    title = call.argument<String>("title")
+                                        ?: "Media download",
+                                    progress = call.argument<Int>("progress") ?: 0,
+                                    indeterminate =
+                                        call.argument<Boolean>("indeterminate")
+                                            ?: false,
+                                )
+                                result.success(true)
+                            }
+                        }
+                        "downloadComplete" -> {
+                            showDownloadComplete(
+                                title = call.argument<String>("title")
+                                    ?: "Media download",
+                                taskId = call.argument<String>("taskId"),
+                            )
+                            result.success(true)
+                        }
+                        "dismissNotification" -> {
+                            val taskId = call.argument<String>("taskId")
+                            if (!taskId.isNullOrBlank()) dismissNotification(taskId)
+                            result.success(true)
+                        }
+                        "startDownloadService" -> {
+                            DownloadForegroundService.start(this)
+                            result.success(true)
+                        }
+                        "stopDownloadService" -> {
+                            DownloadForegroundService.stop(this)
+                            result.success(true)
+                        }
+                        else -> result.notImplemented()
+                    }
                 } catch (error: Exception) {
                     result.error("notification_failed", error.message, null)
                 }
@@ -529,7 +567,44 @@ abstract class LinkyFlutterActivity : FlutterActivity() {
         return text?.takeIf { it.isNotBlank() } ?: intent?.data?.toString()
     }
 
-    private fun showDownloadComplete(title: String) {
+    private fun showDownloadProgress(
+        taskId: String,
+        title: String,
+        progress: Int,
+        indeterminate: Boolean,
+    ) {
+        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val channelId = "linky_download_progress"
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            manager.createNotificationChannel(
+                NotificationChannel(
+                    channelId,
+                    "Download progress",
+                    NotificationManager.IMPORTANCE_LOW,
+                ).apply {
+                    setSound(null, null)
+                    enableVibration(false)
+                },
+            )
+        }
+        val builder = NotificationCompat.Builder(this, channelId)
+            .setSmallIcon(android.R.drawable.stat_sys_download)
+            .setContentTitle(title)
+            .setContentText(if (indeterminate) "Downloading…" else "$progress%")
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setSilent(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setContentIntent(downloadsPendingIntent())
+        if (indeterminate) {
+            builder.setProgress(0, 0, true)
+        } else {
+            builder.setProgress(100, progress.coerceIn(0, 100), false)
+        }
+        manager.notify(notificationId(taskId), builder.build())
+    }
+
+    private fun showDownloadComplete(title: String, taskId: String?) {
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         val channelId = "linky_downloads"
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -541,24 +616,37 @@ abstract class LinkyFlutterActivity : FlutterActivity() {
                 ),
             )
         }
-        val openIntent = Intent(this, MainActivity::class.java).apply {
-            addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_NEW_TASK)
-            putExtra("open_downloads", true)
-        }
-        val pending = PendingIntent.getActivity(
-            this,
-            0,
-            openIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
         val notification = NotificationCompat.Builder(this, channelId)
             .setSmallIcon(android.R.drawable.stat_sys_download_done)
             .setContentTitle("Download complete")
             .setContentText(title)
             .setAutoCancel(true)
-            .setContentIntent(pending)
+            .setContentIntent(downloadsPendingIntent())
             .build()
-        manager.notify(title.hashCode(), notification)
+        manager.notify(
+            if (taskId.isNullOrBlank()) title.hashCode() else notificationId(taskId),
+            notification,
+        )
+    }
+
+    private fun dismissNotification(taskId: String) {
+        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        manager.cancel(notificationId(taskId))
+    }
+
+    private fun notificationId(taskId: String): Int = taskId.hashCode()
+
+    private fun downloadsPendingIntent(): PendingIntent {
+        val openIntent = Intent(this, MainActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_NEW_TASK)
+            putExtra("open_downloads", true)
+        }
+        return PendingIntent.getActivity(
+            this,
+            0,
+            openIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
     }
 
     private fun launchFileIntent(path: String, action: String) {

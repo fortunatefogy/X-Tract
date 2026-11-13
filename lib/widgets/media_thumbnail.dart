@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
@@ -32,6 +33,8 @@ class MediaThumbnail extends StatefulWidget {
 class _MediaThumbnailState extends State<MediaThumbnail> {
   VideoPlayerController? _controller;
   bool _videoFailed = false;
+  Uint8List? _bytes;
+  String? _loadedUrl;
 
   bool get _isVideo => widget.type.toLowerCase() == 'video';
   bool get _isImage => widget.type.toLowerCase() == 'image';
@@ -40,6 +43,7 @@ class _MediaThumbnailState extends State<MediaThumbnail> {
   void initState() {
     super.initState();
     _startVideoPreview();
+    _loadHeaderImage();
   }
 
   @override
@@ -53,7 +57,118 @@ class _MediaThumbnailState extends State<MediaThumbnail> {
       _controller = null;
       _videoFailed = false;
       _startVideoPreview();
+      _bytes = null;
+      _loadedUrl = null;
+      _loadHeaderImage();
     }
+  }
+
+  bool get _useHeaderLoader =>
+      _isImage && widget.headers != null && widget.headers!.isNotEmpty;
+
+  void _loadHeaderImage() {
+    final url = widget.url;
+    if (!_useHeaderLoader || url == null || url.isEmpty) return;
+    if (_loadedUrl == url) return;
+    _loadedUrl = url;
+    _bytes = null;
+    _fetchBytes(url, widget.headers!).then((bytes) {
+      if (!mounted || _loadedUrl != url) return;
+      setState(() => _bytes = bytes);
+    }).catchError((Object _) {});
+  }
+
+  Future<Uint8List> _fetchBytes(
+    String url,
+    Map<String, String> headers,
+  ) async {
+    final attempts = <Map<String, String>>[
+      headers,
+      {
+        for (final entry in headers.entries)
+          if (entry.key.toLowerCase() != 'cookie') entry.key: entry.value,
+      },
+      const <String, String>{},
+    ];
+    Object? lastError;
+    for (final attempt in attempts) {
+      try {
+        final bytes = await _getBytes(url, attempt);
+        if (_looksLikeImage(bytes)) return bytes;
+        lastError = const FormatException('Not an image response');
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    throw HttpException('Thumbnail fetch failed: $lastError');
+  }
+
+  Future<Uint8List> _getBytes(
+    String url,
+    Map<String, String> headers,
+  ) async {
+    final client = HttpClient();
+    try {
+      String? userAgent;
+      for (final entry in headers.entries) {
+        if (entry.key.toLowerCase() == 'user-agent') {
+          userAgent = entry.value;
+          break;
+        }
+      }
+      if (userAgent != null && userAgent.isNotEmpty) {
+        client.userAgent = userAgent;
+      }
+      final request = await client.getUrl(Uri.parse(url));
+      request.followRedirects = true;
+      headers.forEach((key, value) {
+        if (key.toLowerCase() == 'user-agent') return;
+        try {
+          request.headers.set(key, value);
+        } catch (_) {}
+      });
+      final response = await request.close();
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        await response.drain<void>();
+        throw HttpException('HTTP ${response.statusCode}');
+      }
+      return consolidateHttpClientResponseBytes(response);
+    } finally {
+      client.close();
+    }
+  }
+
+  bool _looksLikeImage(Uint8List bytes) {
+    if (bytes.length < 12) return false;
+    if (bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF) {
+      return true;
+    }
+    if (bytes[0] == 0x89 &&
+        bytes[1] == 0x50 &&
+        bytes[2] == 0x4E &&
+        bytes[3] == 0x47) {
+      return true;
+    }
+    if (bytes[0] == 0x47 && bytes[1] == 0x49 && bytes[2] == 0x46) {
+      return true;
+    }
+    if (bytes[0] == 0x52 &&
+        bytes[1] == 0x49 &&
+        bytes[2] == 0x46 &&
+        bytes[3] == 0x46 &&
+        bytes[8] == 0x57 &&
+        bytes[9] == 0x45 &&
+        bytes[10] == 0x42 &&
+        bytes[11] == 0x50) {
+      return true;
+    }
+    if (bytes[4] == 0x66 &&
+        bytes[5] == 0x74 &&
+        bytes[6] == 0x79 &&
+        bytes[7] == 0x70) {
+      return true;
+    }
+    return false;
   }
 
   void _startVideoPreview() {
@@ -91,6 +206,20 @@ class _MediaThumbnailState extends State<MediaThumbnail> {
         return _image(Image.file(file,
             fit: BoxFit.cover,
             errorBuilder: (_, __, ___) => _placeholder(context, video: false)));
+      }
+      if (_useHeaderLoader) {
+        final bytes = _bytes;
+        if (bytes != null) {
+          return _image(Image.memory(
+            bytes,
+            fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) =>
+                _placeholder(context, video: false),
+          ));
+        }
+        return _image(
+          widget.fallback ?? _placeholder(context, video: false),
+        );
       }
       if (url != null && url.isNotEmpty) {
         return _image(Image.network(

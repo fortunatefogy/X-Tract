@@ -222,6 +222,8 @@ class DownloadService extends ChangeNotifier {
   int _starting = 0;
   bool _initialized = false;
   bool _available = false;
+  bool _foregroundStarted = false;
+  Future<void> _foregroundOp = Future<void>.value();
   DateTime _lastNotify = DateTime.fromMillisecondsSinceEpoch(0);
 
   bool get isAvailable => _available;
@@ -362,6 +364,7 @@ class DownloadService extends ChangeNotifier {
       await FileDownloader().cancelTaskWithId(id);
     }
     _schedulePersist();
+    _dismissNotification(id);
   }
 
   Future<void> pause(DownloadRecord record) async {
@@ -375,6 +378,7 @@ class DownloadService extends ChangeNotifier {
       );
       _notify(force: true);
       _schedulePersist();
+      _dismissNotification(id);
       return;
     }
     final handle = _chunked[id];
@@ -387,6 +391,7 @@ class DownloadService extends ChangeNotifier {
       );
       _notify(force: true);
       _schedulePersist();
+      _dismissNotification(id);
       return;
     }
     await FileDownloader().pause(_taskFromRecord(record));
@@ -718,6 +723,7 @@ class DownloadService extends ChangeNotifier {
         error: null,
       );
       _notify(force: true);
+      _reportProgress(current, 0, indeterminate: true);
       unawaited(_runExtractor(current).whenComplete(() {
         _runningExtractors.remove(id);
         _notify(force: true);
@@ -733,6 +739,7 @@ class DownloadService extends ChangeNotifier {
         error: null,
       );
       _notify(force: true);
+      _reportProgress(current, 0, indeterminate: true);
       final task = _isHls(current)
           ? _runHls(current, handle)
           : _isDash(current)
@@ -839,12 +846,14 @@ class DownloadService extends ChangeNotifier {
         onProgress: (completed, total) {
           final current = _records[id];
           if (current == null) return;
+          final ratio = total > 0
+              ? (completed / total).clamp(0.0, 1.0).toDouble()
+              : current.progress;
           _records[id] = current.copyWith(
             state: DownloadState.running,
-            progress: total > 0
-                ? (completed / total).clamp(0.0, 1.0).toDouble()
-                : current.progress,
+            progress: ratio,
           );
+          _reportProgress(current, ratio, indeterminate: total <= 0);
           _notify();
         },
       );
@@ -903,7 +912,8 @@ class DownloadService extends ChangeNotifier {
       );
       _notify(force: true);
       _schedulePersist();
-      unawaited(NotificationService.downloadComplete(current.title));
+      unawaited(
+          NotificationService.downloadComplete(current.title, taskId: id));
     } on HlsCanceled {
       final current = _records[id];
       if (current != null) {
@@ -926,6 +936,7 @@ class DownloadService extends ChangeNotifier {
       }
       _notify(force: true);
       _schedulePersist();
+      _dismissNotification(id);
     } catch (error) {
       final current = _records[id];
       if (current != null) {
@@ -936,6 +947,7 @@ class DownloadService extends ChangeNotifier {
       }
       _notify(force: true);
       _schedulePersist();
+      _dismissNotification(id);
     }
   }
 
@@ -967,12 +979,14 @@ class DownloadService extends ChangeNotifier {
         onProgress: (completed, total) {
           final current = _records[id];
           if (current == null) return;
+          final ratio = total > 0
+              ? (completed / total).clamp(0.0, 1.0).toDouble()
+              : current.progress;
           _records[id] = current.copyWith(
             state: DownloadState.running,
-            progress: total > 0
-                ? (completed / total).clamp(0.0, 1.0).toDouble()
-                : current.progress,
+            progress: ratio,
           );
+          _reportProgress(current, ratio, indeterminate: total <= 0);
           _notify();
         },
       );
@@ -999,7 +1013,8 @@ class DownloadService extends ChangeNotifier {
       );
       _notify(force: true);
       _schedulePersist();
-      unawaited(NotificationService.downloadComplete(current.title));
+      unawaited(
+          NotificationService.downloadComplete(current.title, taskId: id));
     } on DashCanceled {
       final current = _records[id];
       if (current != null) {
@@ -1022,6 +1037,7 @@ class DownloadService extends ChangeNotifier {
       }
       _notify(force: true);
       _schedulePersist();
+      _dismissNotification(id);
     } catch (error) {
       final current = _records[id];
       if (current != null) {
@@ -1032,6 +1048,7 @@ class DownloadService extends ChangeNotifier {
       }
       _notify(force: true);
       _schedulePersist();
+      _dismissNotification(id);
     }
   }
 
@@ -1061,14 +1078,17 @@ class DownloadService extends ChangeNotifier {
         onProgress: (received, total) {
           final current = _records[id];
           if (current == null) return;
+          final ratio = total != null && total > 0
+              ? (received / total).clamp(0.0, 1.0).toDouble()
+              : current.progress;
           _records[id] = current.copyWith(
             state: DownloadState.running,
-            progress: total != null && total > 0
-                ? (received / total).clamp(0.0, 1.0).toDouble()
-                : current.progress,
+            progress: ratio,
             expectedBytes:
                 total != null && total > 0 ? total : current.expectedBytes,
           );
+          _reportProgress(current, ratio,
+              indeterminate: total == null || total <= 0);
           _notify();
         },
       );
@@ -1090,7 +1110,8 @@ class DownloadService extends ChangeNotifier {
       );
       _notify(force: true);
       _schedulePersist();
-      unawaited(NotificationService.downloadComplete(current.title));
+      unawaited(
+          NotificationService.downloadComplete(current.title, taskId: id));
     } on ChunkedDownloadCanceled {
       final current = _records[id];
       if (current != null) {
@@ -1113,6 +1134,7 @@ class DownloadService extends ChangeNotifier {
       }
       _notify(force: true);
       _schedulePersist();
+      _dismissNotification(id);
     } catch (error) {
       final current = _records[id];
       if (current != null) {
@@ -1123,6 +1145,7 @@ class DownloadService extends ChangeNotifier {
       }
       _notify(force: true);
       _schedulePersist();
+      _dismissNotification(id);
     }
   }
 
@@ -1156,10 +1179,12 @@ class DownloadService extends ChangeNotifier {
         onProgress: (progress) {
           final latest = _records[record.taskId];
           if (latest == null || latest.state.isFinal) return;
+          final ratio = progress.clamp(0.0, 1.0).toDouble();
           _records[record.taskId] = latest.copyWith(
             state: DownloadState.running,
-            progress: progress.clamp(0.0, 1.0).toDouble(),
+            progress: ratio,
           );
+          _reportProgress(latest, ratio);
           _notify();
         },
       );
@@ -1174,7 +1199,10 @@ class DownloadService extends ChangeNotifier {
         error: post.$2,
         fallbackAttempted: true,
       );
-      unawaited(NotificationService.downloadComplete(current.title));
+      unawaited(NotificationService.downloadComplete(
+        current.title,
+        taskId: record.taskId,
+      ));
     } catch (error) {
       if (_records[record.taskId]?.state == DownloadState.canceled) return;
       _records[record.taskId] = current.copyWith(
@@ -1182,6 +1210,7 @@ class DownloadService extends ChangeNotifier {
         error: 'Download failed: $error',
         fallbackAttempted: true,
       );
+      _dismissNotification(record.taskId);
     }
     _notify(force: true);
     _schedulePersist();
@@ -1423,7 +1452,44 @@ class DownloadService extends ChangeNotifier {
     _notify(force: true);
   }
 
+  void _reportProgress(
+    DownloadRecord record,
+    double progress, {
+    bool indeterminate = false,
+  }) {
+    unawaited(NotificationService.downloadProgress(
+      record.taskId,
+      record.title,
+      progress,
+      indeterminate: indeterminate,
+    ));
+  }
+
+  void _dismissNotification(String taskId) {
+    unawaited(NotificationService.dismiss(taskId));
+  }
+
+  void _syncForeground() {
+    final needed = _records.values.any(
+      (record) =>
+          record.state.isActive &&
+          record.state != DownloadState.paused &&
+          (_isChunked(record) || _isExtractor(record)),
+    );
+    if (needed == _foregroundStarted) return;
+    _foregroundStarted = needed;
+    _foregroundOp = _foregroundOp.then((_) => _applyForeground(needed));
+  }
+
+  Future<void> _applyForeground(bool needed) async {
+    final applied = needed
+        ? await NotificationService.startDownloadService()
+        : await NotificationService.stopDownloadService();
+    if (!applied) _foregroundStarted = !needed;
+  }
+
   void _notify({bool force = false}) {
+    _syncForeground();
     final now = DateTime.now();
     if (!force &&
         now.difference(_lastNotify) < const Duration(milliseconds: 100)) {
