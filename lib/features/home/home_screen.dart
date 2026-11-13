@@ -11,6 +11,7 @@ import '../../services/settings_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/app_ui.dart';
 import '../../widgets/media_thumbnail.dart';
+import '../../widgets/motion.dart';
 import '../bookmarks/bookmarks_screen.dart';
 import '../browser/media_browser_screen.dart';
 import '../history/history_screen.dart';
@@ -86,6 +87,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _pasteFromClipboard() async {
+    HapticFeedback.selectionClick();
     final data = await Clipboard.getData(Clipboard.kTextPlain);
     final text = data?.text?.trim();
     if (!mounted) return;
@@ -99,6 +101,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _extract() async {
+    HapticFeedback.lightImpact();
     final urls = _extractUrls(_urlController.text);
     if (urls.isEmpty) {
       setState(() => _error = 'Enter a valid http or https link.');
@@ -247,6 +250,7 @@ class _HomeScreenState extends State<HomeScreen> {
             group.downloadable && _selectedGroups.contains(group.key))
         .toList(growable: false);
     if (groups.isEmpty) return;
+    HapticFeedback.mediumImpact();
     setState(() => _queueing = true);
     var queued = 0;
     String? failure;
@@ -345,58 +349,42 @@ class _HomeScreenState extends State<HomeScreen> {
     final allSelected = selectable.isNotEmpty &&
         _selectedGroups.length == selectable.length;
     final showActionBar = _selectedGroups.isNotEmpty;
+    Widget? status;
+    String statusKey = 'none';
+    if (_loading) {
+      statusKey = 'loading';
+      status = const _StatusPill(
+        color: AppColors.teal,
+        icon: Icons.autorenew_rounded,
+        message: 'Scanning page for media…',
+      );
+    } else if (_media.isNotEmpty) {
+      statusKey = 'detected';
+      status = _StatusPill(
+        color: AppColors.teal,
+        icon: Icons.check_circle_rounded,
+        message:
+            'Link detected · ${groups.length} media item${groups.length == 1 ? '' : 's'}',
+        actionLabel: 'CLEAR',
+        onAction: _clearResults,
+      );
+    } else if (_error != null) {
+      statusKey = 'error';
+      status = _StatusPill(
+        color: AppColors.amber,
+        icon: Icons.info_outline_rounded,
+        message: _error!,
+      );
+    }
     return Scaffold(
       body: SafeArea(
         bottom: false,
         child: Stack(
           children: [
             ListView(
+              key: const PageStorageKey('home-scroll'),
               padding: EdgeInsets.fromLTRB(20, 16, 20, showActionBar ? 120 : 32),
               children: [
-                Row(
-                  children: [
-                    Container(
-                      width: 32,
-                      height: 32,
-                      decoration: const BoxDecoration(
-                        color: AppColors.primary,
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(Icons.link_rounded,
-                          size: 18, color: Colors.white),
-                    ),
-                    const SizedBox(width: 8),
-                    Text('Linky',
-                        style: AppText.heading(20,
-                            weight: FontWeight.w800)),
-                    const SizedBox(width: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 3),
-                      decoration: BoxDecoration(
-                        color: palette.accent,
-                        borderRadius:
-                            BorderRadius.circular(AppRadius.pill),
-                      ),
-                      child: Text('Home',
-                          style: AppText.body(11,
-                              weight: FontWeight.w700,
-                              color: palette.accentForeground)),
-                    ),
-                    const Spacer(),
-                    RoundIconButton(
-                      icon: Icons.bookmark_border_rounded,
-                      tooltip: 'Bookmarks',
-                      size: 40,
-                      onPressed: () => Navigator.of(context).push(
-                        MaterialPageRoute<void>(
-                          builder: (_) => const BookmarksScreen(),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 18),
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -409,132 +397,49 @@ class _HomeScreenState extends State<HomeScreen> {
                             style: AppText.body(13,
                                 color: palette.mutedForeground),
                           ),
-                          const SizedBox(height: 2),
+                          const SizedBox(height: 4),
                           Text('Find any media',
-                              style: AppText.display(30,
+                              style: AppText.display(32,
                                   color: palette.foreground)),
                         ],
                       ),
                     ),
                     RoundIconButton(
-                      icon: Icons.public_rounded,
-                      tooltip: 'Open in-app browser',
-                      onPressed: _openBrowser,
+                      icon: Icons.bookmark_border_rounded,
+                      tooltip: 'Bookmarks',
+                      size: 44,
+                      onPressed: () => Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => const BookmarksScreen(),
+                        ),
+                      ),
                     ),
                   ],
                 ),
                 const SizedBox(height: 20),
-                AppCard(
-                  padding: const EdgeInsets.all(14),
-                  child: Column(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.only(left: 14, right: 6),
-                        decoration: BoxDecoration(
-                          color: palette.input,
-                          borderRadius:
-                              BorderRadius.circular(AppRadius.inner),
-                        ),
-                        child: Row(
-                          children: [
-                            Icon(Icons.link_rounded,
-                                size: 20, color: palette.mutedForeground),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: TextField(
-                                controller: _urlController,
-                                keyboardType: TextInputType.url,
-                                textInputAction: TextInputAction.newline,
-                                minLines: 1,
-                                maxLines: 3,
-                                onSubmitted: (_) => _extract(),
-                                style: AppText.body(14),
-                                decoration: InputDecoration(
-                                  isDense: true,
-                                  filled: false,
-                                  contentPadding:
-                                      const EdgeInsets.symmetric(vertical: 14),
-                                  border: InputBorder.none,
-                                  enabledBorder: InputBorder.none,
-                                  focusedBorder: InputBorder.none,
-                                  hintText: 'Paste a webpage or media link',
-                                  hintStyle: AppText.body(14,
-                                      color: palette.mutedForeground),
-                                ),
-                              ),
-                            ),
-                            TextButton(
-                              onPressed: _pasteFromClipboard,
-                              style: TextButton.styleFrom(
-                                backgroundColor: palette.accent,
-                                foregroundColor: palette.accentForeground,
-                                shape: const RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.all(
-                                      Radius.circular(AppRadius.pill)),
-                                ),
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 12, vertical: 6),
-                                minimumSize: const Size(0, 32),
-                                tapTargetSize:
-                                    MaterialTapTargetSize.shrinkWrap,
-                              ),
-                              child: const Text('Paste'),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      SizedBox(
-                        width: double.infinity,
-                        child: FilledButton.icon(
-                          onPressed: _loading ? null : _extract,
-                          icon: _loading
-                              ? const SizedBox(
-                                  width: 16,
-                                  height: 16,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    color: Colors.white,
-                                  ),
-                                )
-                              : const Icon(Icons.search_rounded, size: 18),
-                          label: Text(
-                              _loading ? 'Looking for media…' : 'Find media'),
-                        ),
-                      ),
-                    ],
-                  ),
+                _HeroCard(
+                  controller: _urlController,
+                  loading: _loading,
+                  onPaste: _pasteFromClipboard,
+                  onExtract: _extract,
                 ),
-                if (_loading)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 14),
-                    child: _StatusPill(
-                      color: AppColors.teal,
-                      icon: Icons.autorenew_rounded,
-                      message: 'Scanning page for media…',
-                    ),
-                  )
-                else if (_media.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 14),
-                    child: _StatusPill(
-                      color: AppColors.teal,
-                      icon: Icons.check_circle_rounded,
-                      message:
-                          'Link detected · ${groups.length} media item${groups.length == 1 ? '' : 's'}',
-                      actionLabel: 'CLEAR',
-                      onAction: _clearResults,
-                    ),
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 260),
+                  switchInCurve: Curves.easeOutCubic,
+                  switchOutCurve: Curves.easeInCubic,
+                  transitionBuilder: (child, animation) => SizeTransition(
+                    sizeFactor: animation,
+                    axisAlignment: -1,
+                    child: FadeTransition(opacity: animation, child: child),
                   ),
-                if (_error != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 14),
-                    child: _StatusPill(
-                      color: AppColors.amber,
-                      icon: Icons.info_outline_rounded,
-                      message: _error!,
-                    ),
-                  ),
+                  child: status == null
+                      ? const SizedBox(key: ValueKey('no-status'))
+                      : Padding(
+                          key: ValueKey(statusKey),
+                          padding: const EdgeInsets.only(top: 14),
+                          child: status,
+                        ),
+                ),
                 const SizedBox(height: 18),
                 Row(
                   children: [
@@ -542,29 +447,28 @@ class _HomeScreenState extends State<HomeScreen> {
                       child: _QuickAction(
                         icon: Icons.public_rounded,
                         label: 'Browser',
-                        caption: 'Open web pages',
+                        tint: AppColors.primarySoft,
+                        foreground: AppColors.primarySoftForeground,
                         onTap: _openBrowser,
                       ),
                     ),
-                    const SizedBox(width: 12),
+                    const SizedBox(width: 10),
                     Expanded(
                       child: _QuickAction(
                         icon: Icons.download_rounded,
                         label: 'Downloads',
-                        caption: _activeCaption,
+                        tint: AppColors.tealSoft,
+                        foreground: AppColors.tealDeep,
                         onTap: () => widget.onOpenTab?.call(1),
                       ),
                     ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
+                    const SizedBox(width: 10),
                     Expanded(
                       child: _QuickAction(
                         icon: Icons.history_rounded,
                         label: 'History',
-                        caption: '${HistoryService.instance.entries.length} visits',
+                        tint: AppColors.amberSoft,
+                        foreground: AppColors.amberDeep,
                         onTap: () => Navigator.of(context).push(
                           MaterialPageRoute<void>(
                             builder: (_) => const HistoryScreen(),
@@ -572,18 +476,14 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                       ),
                     ),
-                    const SizedBox(width: 12),
+                    const SizedBox(width: 10),
                     Expanded(
                       child: _QuickAction(
-                        icon: Icons.bookmark_rounded,
-                        label: 'Bookmarks',
-                        caption:
-                            '${BookmarksService.instance.entries.length} saved',
-                        onTap: () => Navigator.of(context).push(
-                          MaterialPageRoute<void>(
-                            builder: (_) => const BookmarksScreen(),
-                          ),
-                        ),
+                        icon: Icons.folder_rounded,
+                        label: 'Library',
+                        tint: AppColors.redSoft,
+                        foreground: AppColors.redDeep,
+                        onTap: () => widget.onOpenTab?.call(2),
                       ),
                     ),
                   ],
@@ -663,12 +563,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  String get _activeCaption {
-    final active = DownloadService.instance.active.length;
-    if (active == 0) return 'Nothing running';
-    return '$active active';
-  }
-
   List<Widget> _buildTypeSections(List<_MediaGroup> groups) {
     final palette = context.palette;
     final byType = <String, List<_MediaGroup>>{};
@@ -686,7 +580,11 @@ class _HomeScreenState extends State<HomeScreen> {
             style: AppText.label(11, color: palette.mutedForeground),
           ),
         ),
-        for (final group in byType[type]!) _groupTile(group),
+        for (final group in byType[type]!)
+          FadeSlideIn(
+            duration: const Duration(milliseconds: 240),
+            child: _groupTile(group),
+          ),
       ],
     ];
   }
@@ -825,13 +723,16 @@ class _HomeScreenState extends State<HomeScreen> {
       child: AppCard(
         padding: const EdgeInsets.all(12),
         onTap: group.downloadable
-            ? () => setState(() {
+            ? () {
+                HapticFeedback.selectionClick();
+                setState(() {
                   if (selected) {
                     _selectedGroups.remove(group.key);
                   } else {
                     _selectedGroups.add(group.key);
                   }
-                })
+                });
+              }
             : null,
         color: selected ? palette.accent : null,
         child: Column(
@@ -867,13 +768,16 @@ class _HomeScreenState extends State<HomeScreen> {
                   selected: selected,
                   enabled: group.downloadable,
                   onTap: group.downloadable
-                      ? () => setState(() {
+                      ? () {
+                          HapticFeedback.selectionClick();
+                          setState(() {
                             if (selected) {
                               _selectedGroups.remove(group.key);
                             } else {
                               _selectedGroups.add(group.key);
                             }
-                          })
+                          });
+                        }
                       : null,
                 ),
               ],
@@ -947,12 +851,16 @@ class _HomeScreenState extends State<HomeScreen> {
       );
     }
     if (previewUrl != null) {
+      final cacheWidth =
+          (56 * MediaQuery.devicePixelRatioOf(context)).round();
       return ClipRRect(
         borderRadius: BorderRadius.circular(AppRadius.inner),
         child: Image.network(
           previewUrl,
           width: 56,
           height: 56,
+          cacheWidth: cacheWidth,
+          filterQuality: FilterQuality.medium,
           fit: BoxFit.cover,
           errorBuilder: (_, __, ___) => _mediaIcon(item),
         ),
@@ -1003,44 +911,210 @@ class _QuickAction extends StatelessWidget {
   const _QuickAction({
     required this.icon,
     required this.label,
-    required this.caption,
+    required this.tint,
+    required this.foreground,
     required this.onTap,
   });
 
   final IconData icon;
   final String label;
-  final String caption;
+  final Color tint;
+  final Color foreground;
   final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
-    final palette = context.palette;
     return AppCard(
       onTap: onTap,
-      child: Row(
+      padding: const EdgeInsets.all(10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
-            width: 40,
-            height: 40,
+            width: 34,
+            height: 34,
             decoration: BoxDecoration(
-              color: palette.accent,
-              borderRadius: BorderRadius.circular(12),
+              color: tint,
+              borderRadius: BorderRadius.circular(11),
             ),
-            child: Icon(icon, size: 20, color: palette.accentForeground),
+            child: Icon(icon, size: 18, color: foreground),
           ),
-          const SizedBox(width: 12),
-          Expanded(
+          const SizedBox(height: 9),
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: AppText.body(11, weight: FontWeight.w600),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HeroCard extends StatelessWidget {
+  const _HeroCard({
+    required this.controller,
+    required this.loading,
+    required this.onPaste,
+    required this.onExtract,
+  });
+
+  final TextEditingController controller;
+  final bool loading;
+  final Future<void> Function() onPaste;
+  final Future<void> Function() onExtract;
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(28),
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [AppColors.heroStart, AppColors.heroEnd],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            top: -46,
+            right: -30,
+            child: Container(
+              width: 150,
+              height: 150,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.white.withValues(alpha: 0.10),
+              ),
+            ),
+          ),
+          Positioned(
+            bottom: -40,
+            left: -40,
+            child: Container(
+              width: 120,
+              height: 120,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.white.withValues(alpha: 0.07),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(20),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(label,
-                    style: AppText.heading(15, weight: FontWeight.w700)),
-                const SizedBox(height: 1),
-                Text(caption,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: AppText.body(11,
-                        color: palette.mutedForeground)),
+                Text(
+                  'SMART LINK SCAN',
+                  style: AppText.label(10, color: const Color(0xFFEDE8FF)),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Paste. Detect. Download.',
+                  style: AppText.display(20, color: Colors.white),
+                ),
+                const SizedBox(height: 14),
+                Container(
+                  height: 54,
+                  padding: const EdgeInsets.only(left: 14, right: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.link_rounded,
+                          size: 18, color: AppColors.primary),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: TextField(
+                          controller: controller,
+                          keyboardType: TextInputType.url,
+                          textInputAction: TextInputAction.newline,
+                          minLines: 1,
+                          maxLines: 3,
+                          onSubmitted: (_) => onExtract(),
+                          style: AppText.body(13),
+                          decoration: InputDecoration(
+                            isDense: true,
+                            filled: false,
+                            contentPadding:
+                                const EdgeInsets.symmetric(vertical: 14),
+                            border: InputBorder.none,
+                            enabledBorder: InputBorder.none,
+                            focusedBorder: InputBorder.none,
+                            hintText: 'Paste a webpage or media link',
+                            hintStyle: AppText.body(13,
+                                color: AppColors.slateLight),
+                          ),
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: onPaste,
+                        style: TextButton.styleFrom(
+                          backgroundColor: AppColors.primarySoft,
+                          foregroundColor: AppColors.primarySoftForeground,
+                          shape: const RoundedRectangleBorder(
+                            borderRadius:
+                                BorderRadius.all(Radius.circular(11)),
+                          ),
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          minimumSize: const Size(0, 36),
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                        child: Text(
+                          'Paste',
+                          style: AppText.body(12,
+                              weight: FontWeight.w700,
+                              color: AppColors.primarySoftForeground),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Material(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(16),
+                    onTap: loading ? null : onExtract,
+                    child: SizedBox(
+                      height: 50,
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          if (loading)
+                            const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: AppColors.primaryDeep,
+                              ),
+                            )
+                          else
+                            const Icon(Icons.search_rounded,
+                                size: 18, color: AppColors.primaryDeep),
+                          const SizedBox(width: 8),
+                          Text(
+                            loading ? 'Looking for media…' : 'Find media',
+                            style: AppText.body(15,
+                                weight: FontWeight.w700,
+                                color: AppColors.primaryDeep),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
               ],
             ),
           ),

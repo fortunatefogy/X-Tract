@@ -174,6 +174,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
       body: SafeArea(
         bottom: false,
         child: ListView(
+          key: const PageStorageKey('downloads-scroll'),
           padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
           children: [
             Row(
@@ -186,7 +187,8 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                           style:
                               AppText.display(30, color: palette.foreground)),
                       const SizedBox(height: 2),
-                      Text('Real-time media engine active',
+                      Text(
+                          '${active.length} active · ${completed.length} completed',
                           style:
                               AppText.body(12, color: palette.mutedForeground)),
                     ],
@@ -294,8 +296,28 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
               ],
             ),
             const SizedBox(height: 22),
-            if (_segment == 0) ..._activeSection(active, failures),
-            if (_segment == 1) ..._completedSection(completed),
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 220),
+              switchInCurve: Curves.easeOutCubic,
+              switchOutCurve: Curves.easeInCubic,
+              transitionBuilder: (child, animation) => FadeTransition(
+                opacity: animation,
+                child: SlideTransition(
+                  position: Tween<Offset>(
+                    begin: const Offset(0, 0.02),
+                    end: Offset.zero,
+                  ).animate(animation),
+                  child: child,
+                ),
+              ),
+              child: Column(
+                key: ValueKey(_segment),
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: _segment == 0
+                    ? _activeSection(active, failures)
+                    : _completedSection(completed),
+              ),
+            ),
           ],
         ),
       ),

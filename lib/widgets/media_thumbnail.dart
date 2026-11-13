@@ -31,6 +31,9 @@ class MediaThumbnail extends StatefulWidget {
 }
 
 class _MediaThumbnailState extends State<MediaThumbnail> {
+  static final Map<String, Uint8List> _byteCache = {};
+  static const _maxCachedThumbnails = 80;
+
   VideoPlayerController? _controller;
   bool _videoFailed = false;
   Uint8List? _bytes;
@@ -72,11 +75,26 @@ class _MediaThumbnailState extends State<MediaThumbnail> {
     if (_loadedUrl == url) return;
     _loadedUrl = url;
     _bytes = null;
+    final cached = _byteCache.remove(url);
+    if (cached != null) {
+      _byteCache[url] = cached;
+      _bytes = cached;
+      return;
+    }
     _fetchBytes(url, widget.headers!).then((bytes) {
       if (!mounted || _loadedUrl != url) return;
+      if (_byteCache.length >= _maxCachedThumbnails) {
+        _byteCache.remove(_byteCache.keys.first);
+      }
+      _byteCache[url] = bytes;
       setState(() => _bytes = bytes);
     }).catchError((Object _) {});
   }
+
+  int _decodeWidth(BuildContext context) =>
+      (widget.size * MediaQuery.devicePixelRatioOf(context))
+          .round()
+          .clamp(1, 2048);
 
   Future<Uint8List> _fetchBytes(
     String url,
@@ -176,6 +194,9 @@ class _MediaThumbnailState extends State<MediaThumbnail> {
     final file = widget.file;
     final url = widget.url;
     if (file == null && (url == null || url.isEmpty)) return;
+    // Initialising a network decoder for every small list thumbnail is costly
+    // and causes scroll jank. Only preview local files or larger frames.
+    if (file == null && widget.size <= 72) return;
     final controller = file != null
         ? VideoPlayerController.file(file)
         : VideoPlayerController.networkUrl(Uri.parse(url!));
@@ -199,11 +220,15 @@ class _MediaThumbnailState extends State<MediaThumbnail> {
 
   @override
   Widget build(BuildContext context) {
+    final cacheWidth = _decodeWidth(context);
     if (_isImage) {
       final file = widget.file;
       final url = widget.url;
       if (file != null) {
-        return _image(Image.file(file,
+        return _image(Image.file(
+            file,
+            cacheWidth: cacheWidth,
+            filterQuality: FilterQuality.medium,
             fit: BoxFit.cover,
             errorBuilder: (_, __, ___) => _placeholder(context, video: false)));
       }
@@ -212,6 +237,8 @@ class _MediaThumbnailState extends State<MediaThumbnail> {
         if (bytes != null) {
           return _image(Image.memory(
             bytes,
+            cacheWidth: cacheWidth,
+            filterQuality: FilterQuality.medium,
             fit: BoxFit.cover,
             errorBuilder: (_, __, ___) =>
                 _placeholder(context, video: false),
@@ -224,6 +251,8 @@ class _MediaThumbnailState extends State<MediaThumbnail> {
       if (url != null && url.isNotEmpty) {
         return _image(Image.network(
           url,
+          cacheWidth: cacheWidth,
+          filterQuality: FilterQuality.medium,
           headers: widget.headers,
           fit: BoxFit.cover,
           errorBuilder: (_, __, ___) => _placeholder(context, video: false),
@@ -237,6 +266,8 @@ class _MediaThumbnailState extends State<MediaThumbnail> {
         return _image(
           Image.network(
             poster,
+            cacheWidth: cacheWidth,
+            filterQuality: FilterQuality.medium,
             headers: widget.headers,
             fit: BoxFit.cover,
             errorBuilder: (_, __, ___) => _placeholder(context, video: true),
@@ -264,23 +295,27 @@ class _MediaThumbnailState extends State<MediaThumbnail> {
         video: _isVideo);
   }
 
-  Widget _image(Widget image, {bool video = false}) => ClipRRect(
-        borderRadius: BorderRadius.circular(8),
-        child: SizedBox(
-          width: widget.size,
-          height: widget.size,
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              image,
-              if (video)
-                const Center(
-                  child: Icon(Icons.play_circle_fill,
-                      color: Colors.white,
-                      size: 25,
-                      shadows: [Shadow(blurRadius: 4, color: Colors.black87)]),
-                ),
-            ],
+  Widget _image(Widget image, {bool video = false}) => RepaintBoundary(
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: SizedBox(
+            width: widget.size,
+            height: widget.size,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                image,
+                if (video)
+                  const Center(
+                    child: Icon(Icons.play_circle_fill,
+                        color: Colors.white,
+                        size: 25,
+                        shadows: [
+                          Shadow(blurRadius: 4, color: Colors.black87)
+                        ]),
+                  ),
+              ],
+            ),
           ),
         ),
       );

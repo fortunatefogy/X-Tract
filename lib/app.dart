@@ -25,6 +25,8 @@ class LinkyApp extends StatelessWidget {
         themeMode: settings.themeMode,
         theme: AppTheme.light,
         darkTheme: AppTheme.dark,
+        themeAnimationDuration: const Duration(milliseconds: 300),
+        themeAnimationCurve: Curves.easeOutCubic,
         home: ShareHost(
           startInShareMode: startInShareMode,
           initialText: initialShareText,

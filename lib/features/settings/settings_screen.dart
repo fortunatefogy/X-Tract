@@ -276,6 +276,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       body: SafeArea(
         bottom: false,
         child: ListView(
+          key: const PageStorageKey('settings-scroll'),
           padding: const EdgeInsets.fromLTRB(20, 16, 20, 40),
           children: [
             Text('Settings',

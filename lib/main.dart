@@ -19,6 +19,10 @@ void main(List<String> args) async {
   final sharedText =
       args.length > 1 && args[1].trim().isNotEmpty ? args[1] : null;
 
+  PaintingBinding.instance.imageCache
+    ..maximumSize = 200
+    ..maximumSizeBytes = 256 << 20;
+
   if (startMode == 'share') {
     await SettingsService.instance.init();
     await StorageService.instance.init();
@@ -34,28 +38,18 @@ void main(List<String> args) async {
 
   await SettingsService.instance.init();
   await StorageService.instance.init();
-  await HistoryService.instance.init();
-  await BookmarksService.instance.init();
-  await SuggestionsService.instance.init();
-  await AdBlockService.instance.init();
-  await ProxyService.instance.applyWebView();
-  await PlaybackPositionService.instance.init();
-  await DownloadService.instance.init();
   runApp(const LinkyApp());
+  unawaited(_initRemaining());
 }
 
 Future<void> _initRemaining() async {
-  for (final init in [
-    HistoryService.instance.init,
-    BookmarksService.instance.init,
-    SuggestionsService.instance.init,
-    AdBlockService.instance.init,
-    ProxyService.instance.applyWebView,
-    PlaybackPositionService.instance.init,
-    DownloadService.instance.init,
-  ]) {
-    try {
-      await init();
-    } catch (_) {}
-  }
+  await Future.wait<void>([
+    HistoryService.instance.init().catchError((_) {}),
+    BookmarksService.instance.init().catchError((_) {}),
+    SuggestionsService.instance.init().catchError((_) {}),
+    AdBlockService.instance.init().catchError((_) {}),
+    ProxyService.instance.applyWebView().catchError((_) {}),
+    PlaybackPositionService.instance.init().catchError((_) {}),
+    DownloadService.instance.init().catchError((_) {}),
+  ]);
 }

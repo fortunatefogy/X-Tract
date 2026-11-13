@@ -402,98 +402,127 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
             return Stack(
               children: [
-                ListView(
-                  padding: EdgeInsets.fromLTRB(
-                    20,
-                    12,
-                    20,
-                    _selecting ? 120 : 32,
-                  ),
-                  children: [
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(
-                          child: Column(
+                CustomScrollView(
+                  key: const PageStorageKey('library-scroll'),
+                  slivers: [
+                    SliverPadding(
+                      padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+                      sliver: SliverList(
+                        delegate: SliverChildListDelegate([
+                          Row(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text('Library',
-                                  style: AppText.display(30,
-                                      color: palette.foreground)),
-                              const SizedBox(height: 2),
-                              Text(
-                                'Your saved media, available offline.',
-                                style: AppText.body(13,
-                                    color: palette.mutedForeground),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text('Library',
+                                        style: AppText.display(30,
+                                            color: palette.foreground)),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      'Your saved media, available offline.',
+                                      style: AppText.body(13,
+                                          color: palette.mutedForeground),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              if (_selecting)
+                                Padding(
+                                  padding: const EdgeInsets.only(right: 8),
+                                  child: RoundIconButton(
+                                    icon: allVisibleSelected
+                                        ? Icons.deselect_rounded
+                                        : Icons.select_all_rounded,
+                                    tooltip: allVisibleSelected
+                                        ? 'Deselect all'
+                                        : 'Select all',
+                                    onPressed:
+                                        files.isEmpty ? null : toggleSelectAll,
+                                  ),
+                                ),
+                              RoundIconButton(
+                                icon: _selecting
+                                    ? Icons.check_rounded
+                                    : Icons.checklist_rounded,
+                                tooltip: _selecting
+                                    ? 'Done selecting'
+                                    : 'Select files',
+                                filled: _selecting,
+                                onPressed: () => setState(() {
+                                  _selecting = !_selecting;
+                                  if (!_selecting) _selectedPaths.clear();
+                                }),
                               ),
                             ],
                           ),
-                        ),
-                        if (_selecting)
-                          Padding(
-                            padding: const EdgeInsets.only(right: 8),
-                            child: RoundIconButton(
-                              icon: allVisibleSelected
-                                  ? Icons.deselect_rounded
-                                  : Icons.select_all_rounded,
-                              tooltip: allVisibleSelected
-                                  ? 'Deselect all'
-                                  : 'Select all',
-                              onPressed: files.isEmpty ? null : toggleSelectAll,
+                          const SizedBox(height: 16),
+                          _StorageCard(data: data),
+                          const SizedBox(height: 14),
+                          TextField(
+                            controller: _searchController,
+                            textInputAction: TextInputAction.search,
+                            decoration: InputDecoration(
+                              hintText: 'Search your files',
+                              prefixIcon: Icon(
+                                Icons.search_rounded,
+                                color: palette.mutedForeground,
+                                size: 20,
+                              ),
                             ),
                           ),
-                        RoundIconButton(
-                          icon: _selecting
-                              ? Icons.check_rounded
-                              : Icons.checklist_rounded,
-                          tooltip:
-                              _selecting ? 'Done selecting' : 'Select files',
-                          filled: _selecting,
-                          onPressed: () => setState(() {
-                            _selecting = !_selecting;
-                            if (!_selecting) _selectedPaths.clear();
-                          }),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                    _StorageCard(data: data),
-                    const SizedBox(height: 14),
-                    TextField(
-                      controller: _searchController,
-                      textInputAction: TextInputAction.search,
-                      decoration: InputDecoration(
-                        hintText: 'Search your files',
-                        prefixIcon: Icon(
-                          Icons.search_rounded,
-                          color: palette.mutedForeground,
-                          size: 20,
-                        ),
+                          const SizedBox(height: 14),
+                          _FilterPills(
+                            data: data,
+                            value: _filter,
+                            onChanged: (value) =>
+                                setState(() => _filter = value),
+                          ),
+                          const SizedBox(height: 14),
+                        ]),
                       ),
                     ),
-                    const SizedBox(height: 14),
-                    _FilterPills(
-                      data: data,
-                      value: _filter,
-                      onChanged: (value) => setState(() => _filter = value),
-                    ),
-                    const SizedBox(height: 14),
                     if (loading)
-                      const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 48),
-                        child: Center(child: CircularProgressIndicator()),
+                      const SliverToBoxAdapter(
+                        child: Padding(
+                          padding: EdgeInsets.symmetric(vertical: 48),
+                          child: Center(child: CircularProgressIndicator()),
+                        ),
                       )
                     else if (files.isEmpty)
-                      _empty(query.isNotEmpty)
-                    else ...[
-                      Text(
-                        '${files.length} file${files.length == 1 ? '' : 's'}',
-                        style:
-                            AppText.label(11, color: palette.mutedForeground),
+                      SliverPadding(
+                        padding: const EdgeInsets.symmetric(horizontal: 20),
+                        sliver: SliverToBoxAdapter(
+                          child: _empty(query.isNotEmpty),
+                        ),
+                      )
+                    else
+                      SliverPadding(
+                        padding: const EdgeInsets.symmetric(horizontal: 20),
+                        sliver: SliverList.builder(
+                          itemCount: files.length + 1,
+                          itemBuilder: (context, index) {
+                            if (index == 0) {
+                              return Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    '${files.length} file${files.length == 1 ? '' : 's'}',
+                                    style: AppText.label(11,
+                                        color: palette.mutedForeground),
+                                  ),
+                                  const SizedBox(height: 10),
+                                ],
+                              );
+                            }
+                            return _fileCard(files[index - 1]);
+                          },
+                        ),
                       ),
-                      const SizedBox(height: 10),
-                      for (final file in files) _fileCard(file),
-                    ],
+                    SliverToBoxAdapter(
+                      child: SizedBox(height: _selecting ? 120 : 32),
+                    ),
                   ],
                 ),
                 if (_selecting)
@@ -672,8 +701,8 @@ class _StorageCard extends StatelessWidget {
     final hasDevice = data.deviceBytes > 0;
     final segments = <(String, int, Color)>[
       ('video', data.bytesByType['video'] ?? 0, AppColors.primary),
-      ('audio', data.bytesByType['audio'] ?? 0, AppColors.forestAccent),
-      ('image', data.bytesByType['image'] ?? 0, const Color(0xFFA7D6C0)),
+      ('audio', data.bytesByType['audio'] ?? 0, const Color(0xFF9F7BFF)),
+      ('image', data.bytesByType['image'] ?? 0, const Color(0xFFD6C8FF)),
       ('document', data.bytesByType['document'] ?? 0, AppColors.amber),
     ];
     return AppCard(

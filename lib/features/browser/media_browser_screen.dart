@@ -20,11 +20,11 @@ import '../../services/media_downloader.dart';
 import '../../services/media_extractor.dart';
 import '../../services/platform_extractor.dart';
 import '../../services/settings_service.dart';
+import '../../services/shell_navigation.dart';
 import '../../services/storage_service.dart';
 import '../../services/suggestions_service.dart';
 import '../../services/detection_log_service.dart';
 import '../../theme/app_theme.dart';
-import '../../widgets/app_ui.dart';
 import '../../widgets/media_thumbnail.dart';
 import '../bookmarks/bookmarks_screen.dart';
 import '../downloads/downloads_screen.dart';
@@ -2045,17 +2045,23 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
         height: 76,
         child: ListView(
           scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
           children: _playingVideos
-              .map((item) => Card(
-                    margin: const EdgeInsets.only(right: 8),
-                    child: InkWell(
-                      borderRadius: BorderRadius.circular(12),
-                      onTap: () => _showCandidates(videosOnly: true),
-                      child: SizedBox(
-                        width: 250,
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 8),
+              .map((item) => Padding(
+                    padding: const EdgeInsets.only(right: 10),
+                    child: Material(
+                      color: AppColors.forestSurface,
+                      borderRadius: BorderRadius.circular(16),
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(16),
+                        onTap: () => _showCandidates(videosOnly: true),
+                        child: Container(
+                          width: 254,
+                          padding: const EdgeInsets.symmetric(horizontal: 10),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: AppColors.forestBorder),
+                          ),
                           child: Row(
                             children: [
                               MediaThumbnail(
@@ -2063,7 +2069,8 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
                                 url: item.url,
                                 poster: item.thumbnail,
                                 size: 48,
-                                fallback: const Icon(Icons.movie_outlined),
+                                fallback: const Icon(Icons.movie_outlined,
+                                    color: AppColors.forestMuted),
                               ),
                               const SizedBox(width: 10),
                               Expanded(
@@ -2075,19 +2082,17 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
                                       item.title ?? 'Video playing',
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                          fontWeight: FontWeight.w600),
+                                      style: AppText.body(13,
+                                          weight: FontWeight.w700,
+                                          color: AppColors.forestText),
                                     ),
+                                    const SizedBox(height: 2),
                                     Text(
                                       'PLAYING · Tap for download options',
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(
-                                        color: Theme.of(context)
-                                            .colorScheme
-                                            .primary,
-                                        fontSize: 11,
-                                      ),
+                                      style: AppText.label(9,
+                                          color: AppColors.forestAccent),
                                     ),
                                   ],
                                 ),
@@ -2691,7 +2696,10 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
-      builder: (sheetContext) => StatefulBuilder(
+      backgroundColor: AppPalette.dark.card,
+      builder: (sheetContext) => Theme(
+        data: AppTheme.dark,
+        child: StatefulBuilder(
         builder: (sheetContext, setSheetState) {
           final grouped = <String, Map<String, List<MediaItem>>>{};
           final playingVideos = _playingVideos;
@@ -2811,13 +2819,13 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
                         Text(
                           videosOnly ? 'Video options' : 'Media found',
                           style: AppText.heading(20,
-                              color: context.palette.foreground),
+                              color: sheetContext.palette.foreground),
                         ),
                         const SizedBox(height: 2),
                         Text(
                           '${_candidates.length} item${_candidates.length == 1 ? '' : 's'} on this page',
                           style: AppText.body(12,
-                              color: context.palette.mutedForeground),
+                              color: sheetContext.palette.mutedForeground),
                         ),
                       ],
                     ),
@@ -3046,6 +3054,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
             ),
           );
         },
+        ),
       ),
     );
   }
@@ -3058,11 +3067,14 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
   }
 
   void _showTabsSheet() {
-    final palette = context.palette;
+    final palette = AppPalette.dark;
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
-      builder: (sheetContext) => StatefulBuilder(
+      backgroundColor: AppPalette.dark.card,
+      builder: (sheetContext) => Theme(
+        data: AppTheme.dark,
+        child: StatefulBuilder(
         builder: (sheetContext, setSheetState) => SafeArea(
           child: SingleChildScrollView(
             child: Column(
@@ -3162,6 +3174,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
               ],
             ),
           ),
+        ),
         ),
       ),
     );
@@ -3625,7 +3638,10 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
       context: context,
       showDragHandle: true,
       isScrollControlled: true,
-      builder: (sheetContext) => StatefulBuilder(
+      backgroundColor: AppPalette.dark.card,
+      builder: (sheetContext) => Theme(
+        data: AppTheme.dark,
+        child: StatefulBuilder(
         builder: (sheetContext, setSheetState) {
           void open(Widget screen) {
             Navigator.of(sheetContext).pop();
@@ -3756,6 +3772,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
             ),
           );
         },
+        ),
       ),
     );
   }
@@ -3861,6 +3878,199 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
     Navigator.of(context).maybePop();
   }
 
+  Widget _browserHeader(BuildContext context) {
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+          child: Row(
+            children: [
+              Expanded(
+                child: Container(
+                  height: 46,
+                  padding: const EdgeInsets.only(left: 14, right: 10),
+                  decoration: BoxDecoration(
+                    color: AppColors.forestSurface,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: AppColors.forestBorder),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.lock_rounded,
+                          size: 15, color: AppColors.forestAccent),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: TextField(
+                          controller: _addressController,
+                          focusNode: _addressFocus,
+                          keyboardType: TextInputType.url,
+                          textInputAction: TextInputAction.go,
+                          onChanged: (_) => _updateSuggestions(),
+                          onSubmitted: (_) => _navigate(),
+                          style: AppText.body(13, color: AppColors.forestText),
+                          cursorColor: AppColors.forestAccent,
+                          decoration: InputDecoration(
+                            isDense: true,
+                            filled: false,
+                            contentPadding: EdgeInsets.zero,
+                            hintText: 'Search or enter address',
+                            hintStyle:
+                                AppText.body(13, color: AppColors.forestMuted),
+                            border: InputBorder.none,
+                            enabledBorder: InputBorder.none,
+                            focusedBorder: InputBorder.none,
+                          ),
+                        ),
+                      ),
+                      GestureDetector(
+                        onTap: () => _webController?.reload(),
+                        child: const Icon(Icons.refresh_rounded,
+                            size: 17, color: AppColors.forestMuted),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        if (_tab.loading)
+          LinearProgressIndicator(
+            value: _tab.progress == 0 ? null : _tab.progress,
+            minHeight: 2,
+            color: AppColors.primary,
+            backgroundColor: AppColors.forestBorder,
+          ),
+      ],
+    );
+  }
+
+  Widget _browserToolbar(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+          16, 8, 16, MediaQuery.viewPaddingOf(context).bottom + 8),
+      child: Container(
+        height: 60,
+        padding: const EdgeInsets.symmetric(horizontal: 6),
+        decoration: BoxDecoration(
+          color: AppColors.forestSurface,
+          borderRadius: BorderRadius.circular(22),
+          border: Border.all(color: AppColors.forestBorder),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.35),
+              blurRadius: 30,
+              offset: const Offset(0, 12),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            _toolButton(
+              icon: Icons.arrow_back_rounded,
+              onTap: _handleBack,
+            ),
+            _toolButton(
+              icon: Icons.arrow_forward_rounded,
+              onTap: _tab.canGoForward
+                  ? () async {
+                      await _webController?.goForward();
+                      await _updateNavigationState(_tab);
+                    }
+                  : null,
+            ),
+            _toolButton(
+              icon: Icons.home_rounded,
+              onTap: _goAppHome,
+            ),
+            _toolButton(
+              icon: _tab.desktopMode
+                  ? Icons.phone_iphone_rounded
+                  : Icons.desktop_windows_rounded,
+              highlighted: _tab.desktopMode,
+              onTap: _toggleDesktopMode,
+            ),
+            _toolButton(
+              icon: Icons.download_rounded,
+              highlighted: true,
+              badge: _candidates.isEmpty ? null : '${_candidates.length}',
+              onTap: _candidates.isEmpty ? null : _showCandidates,
+            ),
+            _toolButton(
+              icon: Icons.tune_rounded,
+              onTap: _showTabsSheet,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _goAppHome() {
+    ShellNavigation.instance.openTab(0);
+    Navigator.of(context).popUntil((route) => route.isFirst);
+  }
+
+  Widget _toolButton({
+    required IconData icon,
+    required VoidCallback? onTap,
+    bool highlighted = false,
+    String? badge,
+  }) {
+    final enabled = onTap != null;
+    return Expanded(
+      child: Center(
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Material(
+              color:
+                  highlighted ? const Color(0xFF2A2050) : Colors.transparent,
+              borderRadius: BorderRadius.circular(14),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(14),
+                onTap: onTap,
+                child: SizedBox(
+                  width: 44,
+                  height: 44,
+                  child: Icon(
+                    icon,
+                    size: 20,
+                    color: !enabled
+                        ? const Color(0xFF59617A)
+                        : highlighted
+                            ? AppColors.forestAccent
+                            : AppColors.forestText,
+                  ),
+                ),
+              ),
+            ),
+            if (badge != null)
+              Positioned(
+                top: 4,
+                right: 4,
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                  constraints: const BoxConstraints(minWidth: 15),
+                  decoration: const BoxDecoration(
+                    color: AppColors.primary,
+                    shape: BoxShape.circle,
+                  ),
+                  alignment: Alignment.center,
+                  child: Text(
+                    badge,
+                    style: AppText.body(9,
+                        weight: FontWeight.w800, color: Colors.white),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final canGoBack = _tab.canGoBack;
@@ -3872,132 +4082,54 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
       },
       child: Scaffold(
         backgroundColor: AppColors.forest,
-        appBar: AppBar(
-          toolbarHeight: 60,
-          backgroundColor: AppColors.forest,
-          foregroundColor: AppColors.forestText,
-          surfaceTintColor: Colors.transparent,
-          leadingWidth: 100,
-          leading: Row(
-            mainAxisSize: MainAxisSize.min,
+        body: SafeArea(
+          bottom: false,
+          child: Column(
             children: [
-              IconButton(
-                tooltip: 'Back',
-                color: AppColors.forestText,
-                onPressed: _handleBack,
-                icon: const Icon(Icons.arrow_back_rounded),
-              ),
-              IconButton(
-                tooltip: 'Forward',
-                color: AppColors.forestMuted,
-                onPressed: _tab.canGoForward
-                    ? () async {
-                        await _webController?.goForward();
-                        await _updateNavigationState(_tab);
-                      }
-                    : null,
-                icon: const Icon(Icons.arrow_forward_rounded),
-              ),
-            ],
-          ),
-          titleSpacing: 0,
-          title: Container(
-            height: 44,
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            decoration: BoxDecoration(
-              color: AppColors.forestSurface,
-              borderRadius: BorderRadius.circular(AppRadius.pill),
-              border: Border.all(color: AppColors.forestBorder),
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.lock_rounded,
-                    size: 15, color: AppColors.forestAccent),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: TextField(
-                    controller: _addressController,
-                    focusNode: _addressFocus,
-                    keyboardType: TextInputType.url,
-                    textInputAction: TextInputAction.go,
-                    onChanged: (_) => _updateSuggestions(),
-                    onSubmitted: (_) => _navigate(),
-                    style: AppText.body(13, color: AppColors.forestText),
-                    cursorColor: AppColors.forestAccent,
-                    decoration: InputDecoration(
-                      isDense: true,
-                      filled: false,
-                      hintText: 'Search or enter address',
-                      hintStyle: AppText.body(13, color: AppColors.forestMuted),
-                      border: InputBorder.none,
-                      enabledBorder: InputBorder.none,
-                      focusedBorder: InputBorder.none,
-                    ),
-                  ),
-                ),
-                GestureDetector(
-                  onTap: () => _webController?.reload(),
-                  child: const Icon(
-                    Icons.refresh_rounded,
-                    size: 17,
-                    color: AppColors.forestMuted,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            Padding(
-              padding: const EdgeInsets.only(right: 12),
-              child: RoundIconButton(
-                icon: Icons.tab_rounded,
-                tooltip: 'Tabs and options',
-                background: AppColors.forestSurface,
-                borderColor: AppColors.forestBorder,
-                color: AppColors.forestAccent,
-                badge: _tabs.length > 1 ? '${_tabs.length}' : null,
-                onPressed: _showTabsSheet,
-              ),
-            ),
-          ],
-          bottom: _tab.loading
-              ? PreferredSize(
-                  preferredSize: const Size.fromHeight(3),
-                  child: LinearProgressIndicator(
-                      value: _tab.progress == 0 ? null : _tab.progress),
-                )
-              : null,
-        ),
-        body: Column(
-          children: [
-            const SizedBox(height: 6),
+              _browserHeader(context),
+              const SizedBox(height: 6),
             if (_addressFocus.hasFocus && _suggestions.isNotEmpty)
-              Material(
-                elevation: 3,
+              Container(
+                margin: const EdgeInsets.symmetric(horizontal: 16),
+                decoration: BoxDecoration(
+                  color: AppColors.forestSurface,
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(color: AppColors.forestBorder),
+                ),
+                clipBehavior: Clip.antiAlias,
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(maxHeight: 260),
                   child: ListView(
                     shrinkWrap: true,
+                    padding: EdgeInsets.zero,
                     children: [
                       for (final suggestion in _suggestions)
                         ListTile(
                           dense: true,
+                          iconColor: AppColors.forestAccent,
+                          textColor: AppColors.forestText,
                           leading: Icon(
                             suggestion.source == 'History'
-                                ? Icons.history
+                                ? Icons.history_rounded
                                 : suggestion.source == 'Bookmark'
-                                    ? Icons.bookmark_outline
-                                    : Icons.public,
+                                    ? Icons.bookmark_outline_rounded
+                                    : Icons.public_rounded,
+                            color: AppColors.forestAccent,
                           ),
                           title: Text(
                             suggestion.title,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
+                            style: AppText.body(13,
+                                weight: FontWeight.w600,
+                                color: AppColors.forestText),
                           ),
                           subtitle: Text(
                             '${suggestion.source} · ${suggestion.url}',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
+                            style: AppText.body(11,
+                                color: AppColors.forestMuted),
                           ),
                           onTap: () {
                             _addressController.text = suggestion.url;
@@ -4042,41 +4174,12 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
                         onOpenUrl: _openUrlFromHome,
                       ),
                     ),
-                  if (!_tab.showHome && _candidates.isNotEmpty)
-                    Positioned(
-                      right: 16,
-                      bottom: MediaQuery.viewPaddingOf(context).bottom + 16,
-                      child: Container(
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.28),
-                              blurRadius: 14,
-                              offset: const Offset(0, 5),
-                            ),
-                          ],
-                        ),
-                        child: RoundIconButton(
-                          icon: Icons.download_rounded,
-                          tooltip:
-                              '${_candidates.length} media item${_candidates.length == 1 ? '' : 's'} found — open',
-                          background: context.palette.card,
-                          borderColor: context.palette.border,
-                          color: AppColors.primary,
-                          size: 52,
-                          iconSize: 22,
-                          badge: _candidates.length > 99
-                              ? '99+'
-                              : '${_candidates.length}',
-                          onPressed: _showCandidates,
-                        ),
-                      ),
-                    ),
                 ],
               ),
             ),
+            _browserToolbar(context),
           ],
+        ),
         ),
       ),
     );

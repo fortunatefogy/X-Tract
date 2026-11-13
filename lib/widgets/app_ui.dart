@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
 
-class AppCard extends StatelessWidget {
+class AppCard extends StatefulWidget {
   const AppCard({
     super.key,
     required this.child,
@@ -19,24 +19,41 @@ class AppCard extends StatelessWidget {
   final double radius;
 
   @override
+  State<AppCard> createState() => _AppCardState();
+}
+
+class _AppCardState extends State<AppCard> {
+  bool _pressed = false;
+
+  @override
   Widget build(BuildContext context) {
     final palette = context.palette;
-    final content = Container(
-      padding: padding,
-      decoration: BoxDecoration(
-        color: color ?? palette.card,
-        borderRadius: BorderRadius.circular(radius),
-        border: Border.all(color: palette.border),
+    final content = RepaintBoundary(
+      child: Container(
+        padding: widget.padding,
+        decoration: BoxDecoration(
+          color: widget.color ?? palette.card,
+          borderRadius: BorderRadius.circular(widget.radius),
+          border: Border.all(color: palette.border),
+        ),
+        child: widget.child,
       ),
-      child: child,
     );
-    if (onTap == null) return content;
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(radius),
-        onTap: onTap,
-        child: content,
+    if (widget.onTap == null) return content;
+    return AnimatedScale(
+      scale: _pressed ? 0.985 : 1,
+      duration: const Duration(milliseconds: 120),
+      curve: Curves.easeOut,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(widget.radius),
+          onTap: widget.onTap,
+          onHighlightChanged: (pressed) {
+            if (_pressed != pressed) setState(() => _pressed = pressed);
+          },
+          child: content,
+        ),
       ),
     );
   }
@@ -270,34 +287,30 @@ class StatTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final palette = context.palette;
     return AppCard(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(14),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (icon != null) ...[
-            Container(
-              width: 30,
-              height: 30,
-              decoration: BoxDecoration(
-                color: palette.accent,
-                shape: BoxShape.circle,
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppText.body(11, color: palette.mutedForeground),
+                ),
               ),
-              child: Icon(icon, size: 16, color: palette.accentForeground),
-            ),
-            const SizedBox(height: 6),
-          ],
+              if (icon != null)
+                Icon(icon, size: 15, color: palette.accentForeground),
+            ],
+          ),
+          const SizedBox(height: 8),
           Text(
             value,
-            textAlign: TextAlign.center,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: AppText.heading(18, weight: FontWeight.w700),
-          ),
-          const SizedBox(height: 1),
-          Text(
-            label,
-            textAlign: TextAlign.center,
-            style: AppText.body(10, color: palette.mutedForeground),
+            style: AppText.display(19, color: palette.foreground),
           ),
         ],
       ),

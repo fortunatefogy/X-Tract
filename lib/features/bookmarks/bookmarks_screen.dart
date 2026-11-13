@@ -187,11 +187,11 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
       width: 52,
       height: 52,
       decoration: BoxDecoration(
-        color: palette.muted,
+        color: palette.accent,
         borderRadius: BorderRadius.circular(AppRadius.inner),
       ),
       child: Icon(Icons.bookmark_rounded,
-          size: 22, color: palette.mutedForeground),
+          size: 22, color: palette.accentForeground),
     );
     if (thumbnail == null || thumbnail.isEmpty) return fallback;
     return ClipRRect(
@@ -200,6 +200,8 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
         thumbnail,
         width: 52,
         height: 52,
+        cacheWidth: (52 * MediaQuery.devicePixelRatioOf(context)).round(),
+        filterQuality: FilterQuality.medium,
         fit: BoxFit.cover,
         errorBuilder: (_, __, ___) => fallback,
       ),

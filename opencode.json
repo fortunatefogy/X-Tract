@@ -2,5 +2,15 @@
   "$schema": "https://opencode.ai/config.json",
   "skills": {
     "paths": [".agents/skills"]
+  },
+  "mcp": {
+    "open-pencil": {
+      "type": "local",
+      "command": ["cmd", "/c", "openpencil-mcp"],
+      "environment": {
+        "OPENPENCIL_MCP_ROOT": "C:\\dev\\Linky"
+      },
+      "enabled": true
+    }
   }
 }

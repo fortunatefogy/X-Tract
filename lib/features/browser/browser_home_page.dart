@@ -27,12 +27,12 @@ class _BrowserHomePageState extends State<BrowserHomePage> {
   final _history = HistoryService.instance;
 
   static const _tints = [
-    Color(0xFF61B795),
-    Color(0xFF58A6D6),
-    Color(0xFFD8A657),
-    Color(0xFFD67C8C),
-    Color(0xFF9A8CD6),
-    Color(0xFF6FCF97),
+    Color(0xFFB9A4FF),
+    Color(0xFF7FD8E8),
+    Color(0xFFF4B860),
+    Color(0xFFE98BA8),
+    Color(0xFF9F7BFF),
+    Color(0xFF74D9B6),
   ];
 
   @override
@@ -41,6 +41,7 @@ class _BrowserHomePageState extends State<BrowserHomePage> {
     _settings.addListener(_refresh);
     _bookmarks.addListener(_refresh);
     _history.addListener(_refresh);
+    _searchFocus.addListener(_refresh);
   }
 
   @override
@@ -48,6 +49,7 @@ class _BrowserHomePageState extends State<BrowserHomePage> {
     _settings.removeListener(_refresh);
     _bookmarks.removeListener(_refresh);
     _history.removeListener(_refresh);
+    _searchFocus.removeListener(_refresh);
     _searchController.dispose();
     _searchFocus.dispose();
     super.dispose();
@@ -69,29 +71,35 @@ class _BrowserHomePageState extends State<BrowserHomePage> {
     final value = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
-      builder: (sheetContext) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
-              child: Text(
-                'Search engine',
-                style: AppText.heading(18, color: context.palette.foreground),
+      backgroundColor: AppPalette.dark.card,
+      builder: (sheetContext) => Theme(
+        data: AppTheme.dark,
+        child: SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+                child: Text(
+                  'Search engine',
+                  style:
+                      AppText.heading(18, color: AppPalette.dark.foreground),
+                ),
               ),
-            ),
-            for (final entry in SettingsService.searchEngineLabel.entries)
-              ListTile(
-                leading: const Icon(Icons.search_rounded),
-                title: Text(entry.value),
-                trailing: _settings.searchEngine == entry.key
-                    ? const Icon(Icons.check_rounded, color: AppColors.primary)
-                    : null,
-                onTap: () => Navigator.of(sheetContext).pop(entry.key),
-              ),
-            const SizedBox(height: 8),
-          ],
+              for (final entry in SettingsService.searchEngineLabel.entries)
+                ListTile(
+                  leading: const Icon(Icons.search_rounded),
+                  title: Text(entry.value),
+                  trailing: _settings.searchEngine == entry.key
+                      ? const Icon(Icons.check_rounded,
+                          color: AppColors.forestAccent)
+                      : null,
+                  onTap: () => Navigator.of(sheetContext).pop(entry.key),
+                ),
+              const SizedBox(height: 8),
+            ],
+          ),
         ),
       ),
     );
@@ -111,187 +119,277 @@ class _BrowserHomePageState extends State<BrowserHomePage> {
 
     return ColoredBox(
       color: AppColors.forest,
-      child: ListView(
-        padding: EdgeInsets.fromLTRB(20, 26, 20, 28 + bottomInset),
+      child: Stack(
         children: [
-          Row(
-            children: [
-              Container(
-                width: 44,
-                height: 44,
+          Positioned(
+            top: -170,
+            left: -60,
+            right: -60,
+            child: IgnorePointer(
+              child: Container(
+                height: 380,
                 decoration: BoxDecoration(
-                  color: AppColors.forestSurface,
-                  shape: BoxShape.circle,
-                  border: Border.all(color: AppColors.forestBorder),
-                ),
-                child: const Icon(
-                  Icons.travel_explore_rounded,
-                  color: AppColors.forestAccent,
-                  size: 22,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Linky Browser',
-                      style: AppText.display(25, color: AppColors.forestText),
-                    ),
-                    Text(
-                      'Search, browse, and save any media',
-                      style: AppText.body(12, color: AppColors.forestMuted),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 24),
-          Container(
-            decoration: BoxDecoration(
-              color: AppColors.forestSurface,
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: AppColors.forestBorder),
-            ),
-            child: Row(
-              children: [
-                const SizedBox(width: 14),
-                const Icon(
-                  Icons.search_rounded,
-                  color: AppColors.forestAccent,
-                  size: 20,
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: TextField(
-                    controller: _searchController,
-                    focusNode: _searchFocus,
-                    textInputAction: TextInputAction.search,
-                    onSubmitted: (_) => _submit(),
-                    style: AppText.body(14, color: AppColors.forestText),
-                    cursorColor: AppColors.forestAccent,
-                    decoration: InputDecoration(
-                      isDense: true,
-                      border: InputBorder.none,
-                      hintText: 'Search or type a website',
-                      hintStyle: AppText.body(13, color: AppColors.forestMuted),
-                      contentPadding: const EdgeInsets.symmetric(vertical: 16),
-                    ),
+                  gradient: RadialGradient(
+                    radius: 0.75,
+                    colors: [
+                      AppColors.primary.withValues(alpha: 0.42),
+                      AppColors.forest.withValues(alpha: 0),
+                    ],
                   ),
                 ),
-                IconButton(
-                  tooltip: 'Search',
-                  onPressed: _submit,
+              ),
+            ),
+          ),
+          ListView(
+            padding: EdgeInsets.fromLTRB(20, 26, 20, 28 + bottomInset),
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 48,
+                    height: 48,
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [AppColors.heroStart, AppColors.heroEnd],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      borderRadius: BorderRadius.circular(15),
+                    ),
+                    child: const Icon(
+                      Icons.travel_explore_rounded,
+                      color: Colors.white,
+                      size: 24,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Linky Browser',
+                          style:
+                              AppText.display(25, color: AppColors.forestText),
+                        ),
+                        Text(
+                          'Search, browse, and save any media',
+                          style:
+                              AppText.body(12, color: AppColors.forestMuted),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 24),
+              _searchBar(context),
+              const SizedBox(height: 10),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton.icon(
+                  onPressed: _pickSearchEngine,
+                  style: TextButton.styleFrom(
+                    foregroundColor: AppColors.forestText,
+                    backgroundColor: AppColors.forestSurface,
+                    shape: const StadiumBorder(),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  ),
                   icon: const Icon(
-                    Icons.arrow_forward_rounded,
-                    color: AppColors.forestAccent,
+                    Icons.public_rounded,
+                    size: 15,
+                    color: AppColors.forestMuted,
+                  ),
+                  label: Text(
+                    'Search with ${_settings.searchEngineName}',
+                    style: AppText.body(12, color: AppColors.forestMuted),
                   ),
                 ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 10),
-          Align(
-            alignment: Alignment.centerRight,
-            child: OutlinedButton.icon(
-              onPressed: _pickSearchEngine,
-              style: OutlinedButton.styleFrom(
-                backgroundColor: AppColors.forestSurface,
-                side: const BorderSide(color: AppColors.forestBorder),
-                foregroundColor: AppColors.forestText,
-                shape: const StadiumBorder(),
               ),
-              icon: const Icon(
-                Icons.public_rounded,
-                size: 16,
-                color: AppColors.forestMuted,
+              const SizedBox(height: 26),
+              _sectionHeader(
+                title: 'Bookmarks',
+                count: bookmarks.length,
               ),
-              label: Text(
-                'Search with ${_settings.searchEngineName}',
-                style: AppText.body(12, color: AppColors.forestMuted),
-              ),
-            ),
-          ),
-          const SizedBox(height: 26),
-          _sectionHeader(
-            icon: Icons.bookmark_rounded,
-            title: 'Bookmarks',
-            count: bookmarks.length,
-          ),
-          const SizedBox(height: 10),
-          if (bookmarks.isEmpty)
-            _emptyHint('Bookmarked pages will appear here.')
-          else
-            SizedBox(
-              height: 104,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                itemCount: bookmarks.length,
-                separatorBuilder: (_, __) => const SizedBox(width: 10),
-                itemBuilder: (context, index) {
-                  final entry = bookmarks[index];
-                  return _siteTile(
-                    url: entry.url,
-                    title: entry.title,
-                    width: 156,
-                  );
-                },
-              ),
-            ),
-          const SizedBox(height: 26),
-          _sectionHeader(
-            icon: Icons.history_rounded,
-            title: 'Frequently visited',
-            count: frequent.length,
-          ),
-          const SizedBox(height: 10),
-          if (frequent.isEmpty)
-            _emptyHint('Sites you visit will appear here.')
-          else
-            LayoutBuilder(
-              builder: (context, constraints) {
-                final width = (constraints.maxWidth - 10) / 2;
-                return Wrap(
-                  spacing: 10,
-                  runSpacing: 10,
-                  children: [
-                    for (final entry in frequent)
-                      _siteTile(
+              const SizedBox(height: 10),
+              if (bookmarks.isEmpty)
+                _emptyHint('Bookmarked pages will appear here.')
+              else
+                SizedBox(
+                  height: 104,
+                  child: ListView.separated(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: bookmarks.length,
+                    separatorBuilder: (_, __) => const SizedBox(width: 10),
+                    itemBuilder: (context, index) {
+                      final entry = bookmarks[index];
+                      return _siteTile(
                         url: entry.url,
                         title: entry.title,
-                        width: width,
-                      ),
-                  ],
-                );
-              },
-            ),
+                        width: 156,
+                      );
+                    },
+                  ),
+                ),
+              const SizedBox(height: 26),
+              _sectionHeader(
+                title: 'Frequently visited',
+                count: frequent.length,
+              ),
+              const SizedBox(height: 10),
+              if (frequent.isEmpty)
+                _emptyHint('Sites you visit will appear here.')
+              else
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final width = (constraints.maxWidth - 10) / 2;
+                    return Wrap(
+                      spacing: 10,
+                      runSpacing: 10,
+                      children: [
+                        for (final entry in frequent)
+                          _siteTile(
+                            url: entry.url,
+                            title: entry.title,
+                            width: width,
+                          ),
+                      ],
+                    );
+                  },
+                ),
+            ],
+          ),
         ],
       ),
     );
   }
 
+  Widget _searchBar(BuildContext context) {
+    final focused = _searchFocus.hasFocus;
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOut,
+      padding: const EdgeInsets.all(1.4),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        gradient: LinearGradient(
+          colors: focused
+              ? const [AppColors.heroStart, AppColors.forestAccent]
+              : const [AppColors.forestBorder, AppColors.forestBorder],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.primary.withValues(alpha: focused ? 0.32 : 0.14),
+            blurRadius: focused ? 24 : 16,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Container(
+        height: 56,
+        decoration: BoxDecoration(
+          color: AppColors.forestSurface,
+          borderRadius: BorderRadius.circular(18.6),
+        ),
+        child: Row(
+          children: [
+            const SizedBox(width: 14),
+            const Icon(
+              Icons.search_rounded,
+              color: AppColors.forestAccent,
+              size: 20,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: TextField(
+                controller: _searchController,
+                focusNode: _searchFocus,
+                textInputAction: TextInputAction.search,
+                onSubmitted: (_) => _submit(),
+                style: AppText.body(14, color: AppColors.forestText),
+                cursorColor: AppColors.forestAccent,
+                decoration: InputDecoration(
+                  isDense: true,
+                  border: InputBorder.none,
+                  hintText: 'Search or type a website',
+                  hintStyle: AppText.body(13, color: AppColors.forestMuted),
+                  contentPadding: const EdgeInsets.symmetric(vertical: 16),
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.only(right: 7),
+              child: Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(
+                      color: AppColors.primary.withValues(alpha: 0.45),
+                      blurRadius: 12,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Material(
+                  color: Colors.transparent,
+                  shape: const CircleBorder(),
+                  clipBehavior: Clip.antiAlias,
+                  child: InkWell(
+                    onTap: _submit,
+                    child: Ink(
+                      decoration: const BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: LinearGradient(
+                          colors: [AppColors.heroStart, AppColors.heroEnd],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
+                      ),
+                      child: const Center(
+                        child: Icon(
+                          Icons.arrow_forward_rounded,
+                          color: Colors.white,
+                          size: 20,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _sectionHeader({
-    required IconData icon,
     required String title,
     required int count,
   }) {
     return Row(
       children: [
-        Icon(icon, size: 18, color: AppColors.forestAccent),
-        const SizedBox(width: 8),
         Expanded(
           child: Text(
-            title,
-            style: AppText.body(14,
-                weight: FontWeight.w800, color: AppColors.forestText),
+            title.toUpperCase(),
+            style: AppText.label(11, color: AppColors.forestMuted),
           ),
         ),
-        Text(
-          '$count',
-          style: AppText.body(11,
-              weight: FontWeight.w700, color: AppColors.forestMuted),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+          decoration: BoxDecoration(
+            color: AppColors.primary.withValues(alpha: 0.22),
+            borderRadius: BorderRadius.circular(999),
+          ),
+          child: Text(
+            '$count',
+            style: AppText.label(10, color: AppColors.forestAccent),
+          ),
         ),
       ],
     );

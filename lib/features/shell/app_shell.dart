@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../services/shell_navigation.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/motion.dart';
 import '../downloads/downloads_screen.dart';
 import '../home/home_screen.dart';
 import '../library/library_screen.dart';
@@ -16,6 +18,7 @@ class AppShell extends StatefulWidget {
 
 class _AppShellState extends State<AppShell> {
   int _index = 0;
+  final Set<int> _loaded = {0};
 
   @override
   void initState() {
@@ -33,24 +36,30 @@ class _AppShellState extends State<AppShell> {
     final requested = ShellNavigation.instance.requestedTab.value;
     if (requested == null || !mounted) return;
     ShellNavigation.instance.consume();
-    setState(() => _index = requested);
+    _openTab(requested);
   }
 
   void _openTab(int index) {
     if (index == _index) return;
-    setState(() => _index = index);
+    HapticFeedback.selectionClick();
+    setState(() {
+      _index = index;
+      _loaded.add(index);
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: IndexedStack(
+      body: AnimatedTabView(
         index: _index,
         children: [
-          HomeScreen(onOpenTab: _openTab),
-          const DownloadsScreen(),
-          const LibraryScreen(),
-          const SettingsScreen(),
+          _loaded.contains(0)
+              ? HomeScreen(onOpenTab: _openTab)
+              : const SizedBox.shrink(),
+          _loaded.contains(1) ? const DownloadsScreen() : const SizedBox.shrink(),
+          _loaded.contains(2) ? const LibraryScreen() : const SizedBox.shrink(),
+          _loaded.contains(3) ? const SettingsScreen() : const SizedBox.shrink(),
         ],
       ),
       bottomNavigationBar: LinkyBottomBar(
@@ -81,15 +90,19 @@ class LinkyBottomBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final palette = context.palette;
-    return Container(
-      decoration: BoxDecoration(
-        color: palette.card,
-        border: Border(top: BorderSide(color: palette.border)),
-      ),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
       child: SafeArea(
         top: false,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+        child: Container(
+          height: 64,
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          decoration: BoxDecoration(
+            color: palette.card,
+            borderRadius: BorderRadius.circular(AppRadius.card),
+            border: Border.all(color: palette.border),
+            boxShadow: AppShadow.floating,
+          ),
           child: Row(
             children: [
               for (var i = 0; i < _items.length; i++)
@@ -137,16 +150,17 @@ class _NavItem extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            TweenAnimationBuilder<double>(
-              tween: Tween(begin: 0, end: selected ? 1 : 0),
+            AnimatedContainer(
               duration: const Duration(milliseconds: 180),
-              builder: (context, t, child) => Transform.translate(
-                offset: Offset(0, -2 * t),
-                child: child,
+              curve: Curves.easeOut,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              decoration: BoxDecoration(
+                color: selected ? palette.accent : Colors.transparent,
+                borderRadius: BorderRadius.circular(11),
               ),
               child: Icon(
                 selected ? activeIcon : icon,
-                size: 24,
+                size: 19,
                 color: color,
               ),
             ),
@@ -154,7 +168,7 @@ class _NavItem extends StatelessWidget {
             Text(
               label,
               style: AppText.body(
-                11,
+                10,
                 weight: selected ? FontWeight.w700 : FontWeight.w500,
                 color: color,
               ),
