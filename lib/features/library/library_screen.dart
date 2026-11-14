@@ -92,8 +92,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
     var total = 0;
     final byType = <String, int>{};
     final sizeByPath = <String, int>{};
-    for (final file in files) {
-      final stat = await file.stat();
+    final stats = await Future.wait(files.map((file) => file.stat()));
+    for (var i = 0; i < files.length; i++) {
+      final file = files[i];
+      final stat = stats[i];
       modified[file] = stat.modified;
       final size = stat.size;
       total += size;
@@ -516,7 +518,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
                                 ],
                               );
                             }
-                            return _fileCard(files[index - 1]);
+                            final file = files[index - 1];
+                            return _fileCard(file, data.sizeByPath[file.path]);
                           },
                         ),
                       ),
@@ -564,7 +567,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
         ),
       );
 
-  Widget _fileCard(File file) {
+  Widget _fileCard(File file, int? size) {
     final palette = context.palette;
     final name = file.uri.pathSegments.last;
     final isImage = _isImage(name);
@@ -640,15 +643,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
                     style: AppText.body(13, weight: FontWeight.w700),
                   ),
                   const SizedBox(height: 3),
-                  FutureBuilder<FileStat>(
-                    future: file.stat(),
-                    builder: (context, stat) => Text(
-                      stat.hasData
-                          ? '${_formatBytes(stat.data!.size)} · '
-                              '${isVideo ? 'Video' : isImage ? 'Image' : isAudio ? 'Audio' : 'File'}'
-                          : 'Saved on this device',
-                      style: AppText.body(11, color: palette.mutedForeground),
-                    ),
+                  Text(
+                    size != null
+                        ? '${_formatBytes(size)} · '
+                            '${isVideo ? 'Video' : isImage ? 'Image' : isAudio ? 'Audio' : 'File'}'
+                        : 'Saved on this device',
+                    style: AppText.body(11, color: palette.mutedForeground),
                   ),
                 ],
               ),

@@ -285,7 +285,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  int get _selectedBytes => _groups()
+  int _selectedBytesOf(List<_MediaGroup> groups) => groups
       .where((group) => _selectedGroups.contains(group.key) && group.downloadable)
       .map((group) =>
           (_chosenQuality[group.key] ?? group.defaultItem).size ?? 0)
@@ -550,8 +550,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 bottom: 16,
                 child: _DownloadBar(
                   count: _selectedGroups.length,
-                  sizeLabel: _selectedBytes > 0
-                      ? _formatBytes(_selectedBytes)
+                  sizeLabel: _selectedBytesOf(groups) > 0
+                      ? _formatBytes(_selectedBytesOf(groups))
                       : null,
                   busy: _queueing,
                   onDownload: _queueing ? null : _downloadSelected,

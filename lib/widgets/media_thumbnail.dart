@@ -1,8 +1,36 @@
+import 'dart:async';
+import 'dart:collection';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
+
+/// Limits how many video previews initialise at once so fast scrolling
+/// through a long list never stalls on native player setup.
+class _PreviewGate {
+  static const _maxConcurrent = 2;
+  static int _active = 0;
+  static final Queue<Completer<void>> _waiting = Queue<Completer<void>>();
+
+  static Future<void> acquire() {
+    if (_active < _maxConcurrent) {
+      _active++;
+      return Future<void>.value();
+    }
+    final waiter = Completer<void>();
+    _waiting.add(waiter);
+    return waiter.future;
+  }
+
+  static void release() {
+    if (_waiting.isNotEmpty) {
+      _waiting.removeFirst().complete();
+    } else {
+      _active--;
+    }
+  }
+}
 
 /// A compact visual preview for image and video media.
 /// Videos show their poster when available, otherwise the paused first frame.
@@ -201,14 +229,20 @@ class _MediaThumbnailState extends State<MediaThumbnail> {
         ? VideoPlayerController.file(file)
         : VideoPlayerController.networkUrl(Uri.parse(url!));
     _controller = controller;
-    controller.initialize().then((_) async {
-      await controller.setVolume(0);
-      await controller.pause();
-      if (mounted && identical(_controller, controller)) setState(() {});
-    }).catchError((Object _) {
-      if (mounted && identical(_controller, controller)) {
-        setState(() => _videoFailed = true);
+    _PreviewGate.acquire().then((_) {
+      if (!mounted || !identical(_controller, controller)) {
+        _PreviewGate.release();
+        return;
       }
+      controller.initialize().then((_) async {
+        await controller.setVolume(0);
+        await controller.pause();
+        if (mounted && identical(_controller, controller)) setState(() {});
+      }).catchError((Object _) {
+        if (mounted && identical(_controller, controller)) {
+          setState(() => _videoFailed = true);
+        }
+      }).whenComplete(_PreviewGate.release);
     });
   }
 

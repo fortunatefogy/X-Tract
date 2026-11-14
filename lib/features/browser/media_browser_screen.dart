@@ -3527,9 +3527,13 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
         },
         onProgressChanged: (controller, progress) {
           if (!mounted) return;
+          final previous = tab.progress;
           tab.progress = progress / 100;
           tab.loading = progress < 100;
-          if (tab == _tab) setState(() {});
+          final meaningful = previous == 0 ||
+              progress >= 100 ||
+              (tab.progress - previous).abs() >= 0.05;
+          if (tab == _tab && meaningful) setState(() {});
         },
         onLoadStop: (controller, url) {
           if (!mounted) return;

@@ -75,9 +75,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                     entry.title.toLowerCase().contains(query) ||
                     entry.url.toLowerCase().contains(query))
                 .toList(growable: false);
-            return ListView(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
-              children: [
+            final rows = <Widget>[
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -138,7 +136,11 @@ class _HistoryScreenState extends State<HistoryScreen> {
                   )
                 else
                   ..._grouped(entries),
-              ],
+            ];
+            return ListView.builder(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+              itemCount: rows.length,
+              itemBuilder: (context, index) => rows[index],
             );
           },
         ),

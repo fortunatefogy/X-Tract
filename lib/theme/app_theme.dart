@@ -257,7 +257,7 @@ class AppTheme {
       fontFamily: _bodyFamily,
       textTheme: textTheme,
       dividerColor: palette.border,
-      splashFactory: InkSparkle.splashFactory,
+      splashFactory: InkRipple.splashFactory,
       visualDensity: VisualDensity.standard,
       pageTransitionsTheme: const PageTransitionsTheme(
         builders: {
