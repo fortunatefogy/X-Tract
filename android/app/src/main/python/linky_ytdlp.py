@@ -1346,47 +1346,130 @@ def _json_object_at(text, start):
     return None
 
 
-def _facebook_crawler_image_items(raw_url, cookie_text=""):
+_FACEBOOK_PHOTO_KEYS = ("viewer_image", "photo_image", "image")
+
+
+def _collect_attachment_photos(value, add):
+    if isinstance(value, list):
+        for entry in value:
+            _collect_attachment_photos(entry, add)
+        return
+    if not isinstance(value, dict):
+        return
+    is_photo = (
+        str(value.get("__isMedia") or "") == "Photo"
+        or str(value.get("__typename") or "") == "Photo"
+    )
+    if is_photo:
+        media_id = value.get("id") or ""
+        for key in _FACEBOOK_PHOTO_KEYS:
+            image = value.get(key)
+            if not isinstance(image, dict):
+                continue
+            uri = image.get("uri")
+            if isinstance(uri, str) and uri:
+                add(uri, media_id)
+                break
+    for child in value.values():
+        if isinstance(child, (dict, list)):
+            _collect_attachment_photos(child, add)
+
+
+def _facebook_album_photos(token, cookie_text=""):
+    if not token:
+        return []
+    url = "https://www.facebook.com/media/set/?set=" + quote(token, safe="")
     try:
         page = _fetch_bytes(
-            raw_url,
+            url,
             _facebook_headers(_FACEBOOK_CRAWLER_HEADERS, cookie_text),
         ).decode("utf-8", "ignore")
     except Exception:
         return []
     page = unescape(page).replace("\\/", "/")
+    photos = []
+    seen = set()
+    for match in re.finditer(r'"__isMedia":"Photo","image":\{', page):
+        window = page[match.end() : match.end() + 1200]
+        uri_match = re.search(r'"uri":"(https://[^"]+)"', window)
+        if not uri_match:
+            continue
+        image_url = uri_match.group(1)
+        media_id_match = re.search(r'"id":"(\d+)"', window)
+        media_id = media_id_match.group(1) if media_id_match else ""
+        key = media_id or image_url
+        if key in seen:
+            continue
+        seen.add(key)
+        photos.append((media_id, image_url))
+    return photos
+
+
+def _facebook_crawler_image_items(raw_url, cookie_text=""):
+    final_url = _facebook_final_url(raw_url, cookie_text)
+    page = None
+    for target in (final_url, raw_url):
+        try:
+            page = _fetch_bytes(
+                target,
+                _facebook_headers(_FACEBOOK_CRAWLER_HEADERS, cookie_text),
+            ).decode("utf-8", "ignore")
+        except Exception:
+            page = None
+        if page:
+            break
+    if not page:
+        return []
+    page = unescape(page).replace("\\/", "/")
 
     media = []
-    marker = page.find('"all_subattachments":')
-    if marker != -1:
-        brace = page.find("{", marker + len('"all_subattachments":'))
-        raw_object = _json_object_at(page, brace) if brace != -1 else None
-        if raw_object:
+    seen_urls = set()
+    declared = 0
+
+    def add_photo(image_url, media_id=""):
+        if not isinstance(image_url, str) or not image_url.startswith(
+            ("http://", "https://")
+        ):
+            return
+        if image_url in seen_urls:
+            return
+        seen_urls.add(image_url)
+        media.append((str(media_id or ""), image_url))
+
+    # A multi-photo post can carry several attachment blocks (one per photo,
+    # album or comment). Read every block instead of only the first one.
+    blocks = 0
+    for key in ('"all_subattachments":', '"subattachments":'):
+        for marker in re.finditer(re.escape(key), page):
+            if blocks >= 40:
+                break
+            brace = page.find("{", marker.end())
+            if brace == -1:
+                continue
+            raw_object = _json_object_at(page, brace)
+            if not raw_object:
+                continue
+            blocks += 1
             try:
                 attachment = json.loads(raw_object)
             except Exception:
-                attachment = None
-            nodes = attachment.get("nodes") if isinstance(attachment, dict) else None
-            if isinstance(nodes, list):
-                for node in nodes:
-                    media_node = node.get("media") if isinstance(node, dict) else None
-                    if not isinstance(media_node, dict):
-                        continue
-                    if media_node.get("__isMedia") != "Photo":
-                        continue
-                    viewer = media_node.get("viewer_image")
-                    preview = media_node.get("image")
-                    image_url = None
-                    if isinstance(viewer, dict):
-                        image_url = viewer.get("uri")
-                    if not isinstance(image_url, str) or not image_url:
-                        if isinstance(preview, dict):
-                            image_url = preview.get("uri")
-                    if not isinstance(image_url, str) or not image_url:
-                        continue
-                    if any(entry[1] == image_url for entry in media):
-                        continue
-                    media.append((str(media_node.get("id") or ""), image_url))
+                continue
+            count = attachment.get("count") if isinstance(attachment, dict) else None
+            if isinstance(count, int) and count > declared:
+                declared = count
+            _collect_attachment_photos(attachment, add_photo)
+
+    # Facebook truncates the attachment nodes to the first five photos but
+    # keeps the album token; the media-set page lists the whole album.
+    token_match = re.search(r'"mediaset_token":"([^"]+)"', page)
+    if token_match:
+        for media_id, image_url in _facebook_album_photos(
+            token_match.group(1), cookie_text
+        ):
+            add_photo(image_url, media_id)
+    if declared > 0 and len(media) > declared:
+        media = media[:declared]
+
     if not media:
         for match in re.finditer(
             r'"photo_image":\{"uri":"(https://lookaside\.fbsbx\.com/[^"]+)"',
@@ -1395,9 +1478,7 @@ def _facebook_crawler_image_items(raw_url, cookie_text=""):
             image_url = match.group(1)
             media_id_match = re.search(r"media_id=(\d+)", image_url)
             media_id = media_id_match.group(1) if media_id_match else ""
-            if any(entry[1] == image_url for entry in media):
-                continue
-            media.append((media_id, image_url))
+            add_photo(image_url, media_id)
     if not media:
         return []
     title_match = re.search(
@@ -1414,7 +1495,7 @@ def _facebook_crawler_image_items(raw_url, cookie_text=""):
     headers = _facebook_headers(_FACEBOOK_HEADERS, cookie_text)
     headers["Referer"] = "https://www.facebook.com/"
     results = []
-    for index, (media_id, image_url) in enumerate(media[:20], start=1):
+    for index, (media_id, image_url) in enumerate(media[:50], start=1):
         item = _thumbnail_image_item(
             raw_url,
             image_url,
@@ -1440,6 +1521,7 @@ def _facebook_image_items(raw_url, cookie_text=""):
         # to the group cover/profile image.
         return []
     urls_to_try = [
+        final_url,
         raw_url,
         "https://www.facebook.com/plugins/post.php?href="
         + quote(raw_url, safe="")
@@ -1531,7 +1613,7 @@ def _facebook_image_items(raw_url, cookie_text=""):
         if item:
             item["request_headers"] = item_headers
             results.append(item)
-        if len(results) >= 20:
+        if len(results) >= 50:
             break
     return results
 

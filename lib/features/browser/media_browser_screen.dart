@@ -1478,6 +1478,13 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
     return null;
   }
 
+  bool _isFacebookPage(String rawUrl) {
+    final host = Uri.tryParse(rawUrl)?.host.toLowerCase() ?? '';
+    return host == 'facebook.com' ||
+        host.endsWith('.facebook.com') ||
+        host == 'fb.watch';
+  }
+
   bool _isJunkImage(String url, int? width, int? height, String? foundIn) {
     if (foundIn == 'post images') return false;
     if ((width != null && width > 0 && width < 200) ||
@@ -1531,6 +1538,25 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
     if (!SettingsService.instance.passesSizeThreshold(size)) return;
     if (kind == 'image' && _isJunkImage(url, width, height, foundIn)) {
       return;
+    }
+    if (kind == 'image' && _isFacebookPage(tab.url)) {
+      if (foundIn == 'post images') {
+        final stale = tab.candidates.entries
+            .where((entry) =>
+                entry.value.type == 'image' &&
+                entry.value.foundIn != 'post images')
+            .map((entry) => entry.value.url)
+            .toList(growable: false);
+        for (final staleUrl in stale) {
+          tab.candidates.remove(staleUrl);
+          tab.candidateKeys.removeWhere((_, value) => value == staleUrl);
+        }
+        if (stale.isNotEmpty && tab == _tab) setState(() {});
+      } else {
+        final authoritative = tab.candidates.values.any((item) =>
+            item.type == 'image' && item.foundIn == 'post images');
+        if (authoritative) return;
+      }
     }
     if (kind == 'video' && url.startsWith('blob:')) {
       final hasExtractorVideo = tab.candidates.values.any((item) =>
@@ -2245,9 +2271,106 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
     );
   }
 
-  Future<void> _downloadCandidate(MediaItem item) async {
+  Future<void> _handleDownloadStart(
+    _BrowserTab tab,
+    DownloadStartRequest request,
+  ) async {
+    final url = request.url.toString();
+    final uri = Uri.tryParse(url);
+    if (uri == null || url.isEmpty) return;
+    final scheme = uri.scheme.toLowerCase();
+    final mime = request.mimeType?.split(';').first.trim();
+    final suggested = request.suggestedFilename?.trim();
+    final pathName = uri.pathSegments.isEmpty ? '' : uri.pathSegments.last;
+    final name = suggested != null && suggested.isNotEmpty
+        ? suggested
+        : (pathName.isNotEmpty ? pathName : 'download');
+    if (scheme == 'blob') {
+      await _downloadReadableBlob(
+        tab,
+        MediaItem(
+          url: url,
+          type: _downloadType(mime, name),
+          title: name,
+          mimeType: mime,
+          sourcePage: tab.url,
+        ),
+      );
+      return;
+    }
+    if (!{'http', 'https'}.contains(scheme)) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('This download link is not supported.')),
+      );
+      return;
+    }
+    DetectionLogService.instance.log(
+      'browser',
+      'download',
+      url,
+      detail: 'Download started from the page',
+    );
+    await _downloadCandidate(
+      MediaItem(
+        url: url,
+        type: _downloadType(mime, name),
+        title: name,
+        mimeType: mime,
+        size: request.contentLength > 0 ? request.contentLength : null,
+        sourcePage: tab.url,
+        foundIn: 'page download',
+        requestHeaders: {
+          if (request.userAgent?.trim().isNotEmpty == true)
+            'User-Agent': request.userAgent!.trim(),
+        },
+      ),
+      tab: tab,
+    );
+  }
+
+  String _downloadType(String? mime, String name) {
+    final lowerMime = (mime ?? '').toLowerCase();
+    if (lowerMime.startsWith('image/')) return 'image';
+    if (lowerMime.startsWith('audio/')) return 'audio';
+    if (lowerMime.startsWith('video/') ||
+        lowerMime.contains('mpegurl') ||
+        lowerMime.contains('dash+xml')) {
+      return 'video';
+    }
+    final extension = name.toLowerCase().split('.').last;
+    if (const {
+      'jpg',
+      'jpeg',
+      'jpe',
+      'png',
+      'gif',
+      'webp',
+      'avif',
+      'bmp',
+      'heic',
+      'heif',
+      'svg',
+    }.contains(extension)) {
+      return 'image';
+    }
+    if (const {'mp4', 'm4v', 'webm', 'mov', '3gp', 'mkv', 'avi', 'flv'}
+        .contains(extension)) {
+      return 'video';
+    }
+    if (const {'mp3', 'm4a', 'aac', 'ogg', 'oga', 'opus', 'wav', 'flac'}
+        .contains(extension)) {
+      return 'audio';
+    }
+    return 'document';
+  }
+
+  Future<void> _downloadCandidate(
+    MediaItem item, {
+    _BrowserTab? tab,
+  }) async {
     if (Uri.tryParse(item.url)?.scheme == 'blob') {
-      await _downloadReadableBlob(_tab, item);
+      await _downloadReadableBlob(tab ?? _tab, item);
       return;
     }
     final extension = Uri.parse(item.url).path.toLowerCase();
@@ -2348,7 +2471,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text('Saved ${file.uri.pathSegments.last} to Downloads.')));
     } catch (error) {
-      await _abortBlobCapture(_tab, error);
+      await _abortBlobCapture(tab, error);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(
@@ -3200,6 +3323,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
         supportMultipleWindows: true,
         useOnLoadResource: true,
         useShouldInterceptRequest: true,
+        useOnDownloadStart: true,
         userAgent: tab.desktopMode ? _desktopUserAgent : _mobileUserAgent,
         useWideViewPort: tab.desktopMode,
         loadWithOverviewMode: tab.desktopMode,
@@ -3628,6 +3752,9 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
         },
         shouldOverrideUrlLoading: (controller, action) =>
             _decideNavigation(tab, action),
+        onDownloadStartRequest: (controller, request) {
+          unawaited(_handleDownloadStart(tab, request));
+        },
         onReceivedError: (controller, request, error) {
           if (request.isForMainFrame == true && mounted) {
             tab.error = 'Could not load this webpage.';

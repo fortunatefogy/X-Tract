@@ -77,36 +77,49 @@ class _LibraryScreenState extends State<LibraryScreen> {
     final directory = await StorageService.instance.downloadDirectory();
     final files = <File>[];
     if (await directory.exists()) {
-      files.addAll(
-        await directory
-            .list(followLinks: false)
-            .where((entity) => entity is File)
-            .cast<File>()
-            .where((file) {
-          final name = file.uri.pathSegments.last;
-          return !name.startsWith('.') && !name.startsWith('linky_');
-        }).toList(),
-      );
+      try {
+        files.addAll(
+          await directory
+              .list(followLinks: false)
+              .where((entity) => entity is File)
+              .cast<File>()
+              .where((file) {
+            final name = file.uri.pathSegments.last;
+            return !name.startsWith('.') && !name.startsWith('linky_');
+          }).toList(),
+        );
+      } on FileSystemException {
+        // Keep whatever was read before the directory became unavailable.
+      }
     }
     final modified = <File, DateTime>{};
     var total = 0;
     final byType = <String, int>{};
     final sizeByPath = <String, int>{};
-    final stats = await Future.wait(files.map((file) => file.stat()));
+    final stats = await Future.wait(files.map((file) async {
+      try {
+        return await file.stat();
+      } on FileSystemException {
+        return null;
+      }
+    }));
+    final available = <File>[];
     for (var i = 0; i < files.length; i++) {
       final file = files[i];
       final stat = stats[i];
+      if (stat == null) continue;
       modified[file] = stat.modified;
       final size = stat.size;
       total += size;
       sizeByPath[file.path] = size;
       final type = _category(file.uri.pathSegments.last);
       byType[type] = (byType[type] ?? 0) + size;
+      available.add(file);
     }
-    files.sort((a, b) => modified[b]!.compareTo(modified[a]!));
+    available.sort((a, b) => modified[b]!.compareTo(modified[a]!));
     final info = await DeviceResources.instance.storageInfo();
     return _LibraryData(
-      files: files,
+      files: available,
       totalBytes: total,
       bytesByType: byType,
       sizeByPath: sizeByPath,

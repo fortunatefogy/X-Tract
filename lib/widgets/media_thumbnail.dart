@@ -222,9 +222,10 @@ class _MediaThumbnailState extends State<MediaThumbnail> {
     final file = widget.file;
     final url = widget.url;
     if (file == null && (url == null || url.isEmpty)) return;
-    // Initialising a network decoder for every small list thumbnail is costly
-    // and causes scroll jank. Only preview local files or larger frames.
-    if (file == null && widget.size <= 72) return;
+    // Initialising a decoder for every small list thumbnail is costly and
+    // crashes long lists (native player exhaustion). Only preview larger
+    // frames; small list rows fall back to the poster or icon.
+    if (widget.size <= 72) return;
     final controller = file != null
         ? VideoPlayerController.file(file)
         : VideoPlayerController.networkUrl(Uri.parse(url!));
