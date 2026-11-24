@@ -1031,32 +1031,36 @@ class _LibraryScreenState extends State<LibraryScreen> {
         onTap: _selecting
             ? () => _toggleSelect(file)
             : () => _openViewer(files, position),
+        onLongPress:
+            _selecting ? null : () => _toggleSelect(file),
         child: Row(
           children: [
-            GestureDetector(
-              onTap: _selecting ? () => _toggleSelect(file) : null,
-              behavior: HitTestBehavior.opaque,
-              child: Padding(
-                padding: const EdgeInsets.only(top: 12, bottom: 12, right: 10),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 150),
-                  width: 22,
-                  height: 22,
-                  decoration: BoxDecoration(
-                    color: selected ? AppColors.primary : Colors.transparent,
-                    borderRadius: BorderRadius.circular(7),
-                    border: Border.all(
-                      color: selected ? AppColors.primary : palette.border,
-                      width: 1.6,
+            if (_selecting)
+              GestureDetector(
+                onTap: () => _toggleSelect(file),
+                behavior: HitTestBehavior.opaque,
+                child: Padding(
+                  padding:
+                      const EdgeInsets.only(top: 12, bottom: 12, right: 10),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 150),
+                    width: 22,
+                    height: 22,
+                    decoration: BoxDecoration(
+                      color: selected ? AppColors.primary : Colors.transparent,
+                      borderRadius: BorderRadius.circular(7),
+                      border: Border.all(
+                        color: selected ? AppColors.primary : palette.border,
+                        width: 1.6,
+                      ),
                     ),
+                    child: selected
+                        ? const Icon(Icons.check_rounded,
+                            size: 14, color: Colors.white)
+                        : null,
                   ),
-                  child: selected
-                      ? const Icon(Icons.check_rounded,
-                          size: 14, color: Colors.white)
-                      : null,
                 ),
               ),
-            ),
             MediaThumbnail(
               type: isImage
                   ? 'image'

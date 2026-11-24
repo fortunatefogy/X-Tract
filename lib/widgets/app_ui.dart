@@ -8,6 +8,7 @@ class AppCard extends StatefulWidget {
     required this.child,
     this.padding = const EdgeInsets.all(16),
     this.onTap,
+    this.onLongPress,
     this.color,
     this.radius = AppRadius.card,
   });
@@ -15,6 +16,7 @@ class AppCard extends StatefulWidget {
   final Widget child;
   final EdgeInsetsGeometry padding;
   final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
   final Color? color;
   final double radius;
 
@@ -39,7 +41,7 @@ class _AppCardState extends State<AppCard> {
         child: widget.child,
       ),
     );
-    if (widget.onTap == null) return content;
+    if (widget.onTap == null && widget.onLongPress == null) return content;
     return AnimatedScale(
       scale: _pressed ? 0.985 : 1,
       duration: const Duration(milliseconds: 120),
@@ -49,6 +51,7 @@ class _AppCardState extends State<AppCard> {
         child: InkWell(
           borderRadius: BorderRadius.circular(widget.radius),
           onTap: widget.onTap,
+          onLongPress: widget.onLongPress,
           onHighlightChanged: (pressed) {
             if (_pressed != pressed) setState(() => _pressed = pressed);
           },
