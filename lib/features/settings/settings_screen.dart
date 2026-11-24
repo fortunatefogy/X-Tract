@@ -86,7 +86,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _clearCookies() async {
     final confirmed = await _confirmAction(
       title: 'Clear browser cookies?',
-      message: 'You will be signed out of every site in the Linky browser.',
+      message: 'You will be signed out of every site in the Comet browser.',
       confirm: 'Clear cookies',
     );
     if (confirmed != true) return;
@@ -318,7 +318,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             Text('Settings',
                 style: AppText.display(30, color: palette.foreground)),
             const SizedBox(height: 2),
-            Text('Tune how Linky finds and saves media.',
+            Text('Tune how Comet finds and saves media.',
                 style: AppText.body(13, color: palette.mutedForeground)),
             const SizedBox(height: 22),
             _Group(
@@ -368,9 +368,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 _SwitchRow(
                   title: 'Fingerprint lock',
                   subtitle:
-                      'Ask for your fingerprint or screen lock when opening Linky and after leaving it',
+                      'Ask for your fingerprint or screen lock when opening Comet and after leaving it',
                   value: _settings.appLockEnabled,
                   onChanged: _settings.setAppLockEnabled,
+                ),
+                _SwitchRow(
+                  title: 'Library lock',
+                  subtitle:
+                      'Ask for your fingerprint or screen lock before opening the Library',
+                  value: _settings.libraryLockEnabled,
+                  onChanged: _settings.setLibraryLockEnabled,
                 ),
               ],
             ),
@@ -680,7 +687,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       final confirmed = await _confirmAction(
                         title: 'Remove rule list?',
                         message: 'This list will no longer block ads in the '
-                            'Linky browser.',
+                            'Comet browser.',
                         confirm: 'Remove',
                       );
                       if (confirmed != true) return;
@@ -788,7 +795,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             const SizedBox(height: 20),
             Text(
-              'Linky 0.1.0',
+              'Comet 0.1.0',
               textAlign: TextAlign.center,
               style: AppText.body(12, color: palette.mutedForeground),
             ),

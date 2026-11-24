@@ -293,7 +293,7 @@ class DownloadService extends ChangeNotifier {
       for (final entry in extraHeaders.entries) entry.key: entry.value,
     };
     if (!headers.keys.any((key) => key.toLowerCase() == 'user-agent')) {
-      headers['User-Agent'] = 'Linky/0.1 (Android)';
+      headers['User-Agent'] = 'Comet/0.1 (Android)';
     }
 
     final filename = await _uniqueFilename(item);

@@ -97,7 +97,7 @@ class SecureDnsService {
   Future<List<InternetAddress>> _resolveDoH(String host, String endpoint) async {
     final client = HttpClient()
       ..connectionTimeout = const Duration(seconds: 10)
-      ..userAgent = 'Linky Android';
+      ..userAgent = 'Comet Android';
     try {
       final addresses = <InternetAddress>[];
       for (final type in ['A', 'AAAA']) {

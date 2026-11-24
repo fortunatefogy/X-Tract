@@ -53,7 +53,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
   static const _webrtcBlockScript = r'''(() => {
     try {
       const blocked = function () {
-        throw new DOMException('WebRTC is disabled by Linky.', 'NotAllowedError');
+        throw new DOMException('WebRTC is disabled by Comet.', 'NotAllowedError');
       };
       const Stub = function () {
         this.createDataChannel = blocked;
@@ -198,7 +198,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
                 });
               } catch (_) {
                 return Promise.reject(
-                  new DOMException('Blocked by Linky.', 'AbortError')
+                  new DOMException('Blocked by Comet.', 'AbortError')
                 );
               }
             }
@@ -2449,7 +2449,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
           if (!response.ok) throw new Error(`Browser could not read this blob (\${response.status}).`);
           const blob = await response.blob();
           if (!blob.size) throw new Error('The browser returned an empty media blob.');
-          if (blob.size > $maximumBytes) throw new Error('This media file is larger than Linky’s 512 MB capture limit.');
+          if (blob.size > $maximumBytes) throw new Error('This media file is larger than Comet’s 512 MB capture limit.');
           const bridge = window.flutter_inappwebview;
           if (!bridge) throw new Error('The page capture bridge is unavailable.');
           await bridge.callHandler('linkyBlobStart', JSON.stringify({size: blob.size, mime: blob.type || 'video/mp4'}));
@@ -2528,7 +2528,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
       tab.blobBytesReceived += bytes.length;
       if (tab.blobBytesReceived > 512 * 1024 * 1024) {
         throw const FormatException(
-            'The video exceeded Linky’s 512 MB capture limit.');
+            'The video exceeded Comet’s 512 MB capture limit.');
       }
       sink.add(bytes);
       return true;

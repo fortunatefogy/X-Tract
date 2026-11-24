@@ -6,6 +6,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
+import '../services/video_thumbnail_service.dart';
+
 /// Limits how many video previews initialise at once so fast scrolling
 /// through a long list never stalls on native player setup.
 class _PreviewGate {
@@ -66,6 +68,7 @@ class _MediaThumbnailState extends State<MediaThumbnail> {
   bool _videoFailed = false;
   Uint8List? _bytes;
   String? _loadedUrl;
+  File? _localThumb;
 
   bool get _isVideo => widget.type.toLowerCase() == 'video';
   bool get _isImage => widget.type.toLowerCase() == 'image';
@@ -73,7 +76,7 @@ class _MediaThumbnailState extends State<MediaThumbnail> {
   @override
   void initState() {
     super.initState();
-    _startVideoPreview();
+    _primeVisual();
     _loadHeaderImage();
   }
 
@@ -87,11 +90,33 @@ class _MediaThumbnailState extends State<MediaThumbnail> {
       _controller?.dispose();
       _controller = null;
       _videoFailed = false;
-      _startVideoPreview();
+      _localThumb = null;
+      _primeVisual();
       _bytes = null;
       _loadedUrl = null;
       _loadHeaderImage();
     }
+  }
+
+  void _primeVisual() {
+    if (!_isVideo) return;
+    if (widget.file != null) {
+      _loadLocalThumbnail();
+    } else {
+      _startVideoPreview();
+    }
+  }
+
+  Future<void> _loadLocalThumbnail() async {
+    final file = widget.file;
+    if (file == null || widget.poster?.isNotEmpty == true) return;
+    final path = await VideoThumbnailService.instance.thumbnailFor(file);
+    if (!mounted || widget.file?.path != file.path) return;
+    if (path == null) {
+      _startVideoPreview();
+      return;
+    }
+    setState(() => _localThumb = File(path));
   }
 
   bool get _useHeaderLoader =>
@@ -304,6 +329,19 @@ class _MediaThumbnailState extends State<MediaThumbnail> {
             cacheWidth: cacheWidth,
             filterQuality: FilterQuality.medium,
             headers: widget.headers,
+            fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) => _placeholder(context, video: true),
+          ),
+          video: true,
+        );
+      }
+      final thumb = _localThumb;
+      if (thumb != null) {
+        return _image(
+          Image.file(
+            thumb,
+            cacheWidth: cacheWidth,
+            filterQuality: FilterQuality.medium,
             fit: BoxFit.cover,
             errorBuilder: (_, __, ___) => _placeholder(context, video: true),
           ),

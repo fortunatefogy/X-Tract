@@ -168,7 +168,7 @@ class _BrowserHomePageState extends State<BrowserHomePage> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Linky Browser',
+                          'Comet Browser',
                           style:
                               AppText.display(25, color: AppColors.forestText),
                         ),

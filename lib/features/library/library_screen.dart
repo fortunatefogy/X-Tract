@@ -2,10 +2,13 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import '../../services/biometric_auth.dart';
 import '../../services/device_media_channel.dart';
 import '../../services/device_resources.dart';
 import '../../services/download_service.dart';
+import '../../services/library_lock.dart';
 import '../../services/media_downloader.dart';
+import '../../services/settings_service.dart';
 import '../../services/storage_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/app_ui.dart';
@@ -45,20 +48,86 @@ class _LibraryScreenState extends State<LibraryScreen> {
   bool _selecting = false;
   String _filter = 'all';
   String _completedSignature = '';
+  bool _locked = false;
+  bool _authenticating = false;
+  String? _authError;
 
   @override
   void initState() {
     super.initState();
     _data = _loadData();
     DownloadService.instance.addListener(_onDownloadsChanged);
+    SettingsService.instance.addListener(_onSettingsChanged);
+    LibraryLockController.instance.addListener(_onLockRequested);
     _searchController.addListener(() => setState(() {}));
+    if (SettingsService.instance.libraryLockEnabled) {
+      _locked = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) => _authenticate());
+    }
   }
 
   @override
   void dispose() {
     DownloadService.instance.removeListener(_onDownloadsChanged);
+    SettingsService.instance.removeListener(_onSettingsChanged);
+    LibraryLockController.instance.removeListener(_onLockRequested);
     _searchController.dispose();
     super.dispose();
+  }
+
+  void _onLockRequested() {
+    if (!mounted || !SettingsService.instance.libraryLockEnabled) return;
+    if (!LibraryLockController.instance.active) return;
+    if (_authenticating) return;
+    if (!_locked) setState(() => _locked = true);
+    _authenticate();
+  }
+
+  void _onSettingsChanged() {
+    if (!mounted) return;
+    if (!SettingsService.instance.libraryLockEnabled && _locked) {
+      setState(() => _locked = false);
+    } else {
+      setState(() {});
+    }
+  }
+
+  Future<void> _authenticate() async {
+    if (_authenticating || !mounted) return;
+    if (!SettingsService.instance.libraryLockEnabled) {
+      if (_locked) setState(() => _locked = false);
+      return;
+    }
+    if (!LibraryLockController.instance.active) return;
+    _authenticating = true;
+    LibraryLockController.instance.authenticating = true;
+    try {
+      // Let the tab transition finish; a prompt launched while the activity is
+      // still switching focus is often dismissed on the first attempt.
+      await Future<void>.delayed(const Duration(milliseconds: 320));
+      // The user may have left the Library while we were waiting; never show a
+      // prompt on top of another screen.
+      if (!mounted ||
+          !SettingsService.instance.libraryLockEnabled ||
+          !LibraryLockController.instance.active) {
+        return;
+      }
+      final outcome = await BiometricAuth.authenticate('Unlock your Library');
+      if (!mounted) return;
+      if (outcome == BiometricOutcome.success) {
+        setState(() {
+          _locked = false;
+          _authError = null;
+        });
+      } else if (outcome == BiometricOutcome.unavailable) {
+        setState(() => _authError =
+            'No fingerprint, face, or screen lock is set up on this device. '
+                'Set a screen lock in system settings, then tap Unlock.');
+      }
+    } finally {
+      _authenticating = false;
+      LibraryLockController.instance.authenticating = false;
+    }
   }
 
   void _onDownloadsChanged() {
@@ -408,9 +477,55 @@ class _LibraryScreenState extends State<LibraryScreen> {
     });
   }
 
+  Widget _lockedView(BuildContext context) {
+    final palette = context.palette;
+    return Scaffold(
+      body: SafeArea(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 28),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.lock_rounded, size: 64, color: palette.foreground),
+                const SizedBox(height: 18),
+                Text('Library is locked',
+                    style: AppText.display(24, color: palette.foreground)),
+                const SizedBox(height: 6),
+                Text(
+                  'Confirm your fingerprint or screen lock to view your '
+                  'saved media.',
+                  textAlign: TextAlign.center,
+                  style: AppText.body(13, color: palette.mutedForeground),
+                ),
+                if (_authError != null) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    _authError!,
+                    textAlign: TextAlign.center,
+                    style: AppText.body(11, color: palette.destructive),
+                  ),
+                ],
+                const SizedBox(height: 26),
+                FilledButton.icon(
+                  onPressed: _authenticate,
+                  icon: const Icon(Icons.lock_open_rounded),
+                  label: const Text('Unlock'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final palette = context.palette;
+    if (_locked && SettingsService.instance.libraryLockEnabled) {
+      return _lockedView(context);
+    }
     return Scaffold(
       body: SafeArea(
         bottom: false,

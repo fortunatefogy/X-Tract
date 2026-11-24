@@ -102,7 +102,7 @@ class SuggestionsService {
     }
     final client = HttpClient()
       ..connectionTimeout = const Duration(seconds: 15)
-      ..userAgent = 'Linky Android';
+      ..userAgent = 'Comet Android';
     try {
       final request = await client.getUrl(url).timeout(
             const Duration(seconds: 20),

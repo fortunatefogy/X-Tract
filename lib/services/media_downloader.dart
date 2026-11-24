@@ -114,7 +114,7 @@ class MediaDownloader {
       duplicateIndex++;
     }
 
-    final client = HttpClient()..userAgent = 'Linky Android';
+    final client = HttpClient()..userAgent = 'Comet Android';
     ProxyService.applyToClient(client);
     await SecureDnsService.instance.configure(client);
     IOSink? output;

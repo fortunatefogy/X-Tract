@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../services/biometric_auth.dart';
 import '../../services/download_service.dart';
+import '../../services/library_lock.dart';
+import '../../services/settings_service.dart';
 import '../../services/shell_navigation.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/motion.dart';
@@ -17,20 +20,56 @@ class AppShell extends StatefulWidget {
   State<AppShell> createState() => _AppShellState();
 }
 
-class _AppShellState extends State<AppShell> {
+class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
+  static const _libraryTab = 2;
+
   int _index = 0;
+  bool _backgrounded = false;
   final Set<int> _loaded = {0};
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     ShellNavigation.instance.requestedTab.addListener(_handleRequestedTab);
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     ShellNavigation.instance.requestedTab.removeListener(_handleRequestedTab);
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // The biometric prompt pauses the activity; ignore it so unlocking is not
+    // immediately undone, and switching tabs never re-prompts.
+    if (BiometricAuth.isAuthenticating || BiometricAuth.justAuthenticated) {
+      if (state == AppLifecycleState.resumed) _backgrounded = false;
+      return;
+    }
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden) {
+      _backgrounded = true;
+      return;
+    }
+    if (state != AppLifecycleState.resumed || !_backgrounded) return;
+    _backgrounded = false;
+    // With the full app lock enabled the lock gate already covers resume, so
+    // only add a Library lock on top when the app itself is unlocked.
+    if (_index == _libraryTab &&
+        SettingsService.instance.libraryLockEnabled &&
+        !SettingsService.instance.appLockEnabled &&
+        !LibraryLockController.instance.authenticating) {
+      LibraryLockController.instance.requestLock();
+    }
+  }
+
+  void _requestLibraryLock() {
+    if (SettingsService.instance.libraryLockEnabled) {
+      LibraryLockController.instance.requestLock();
+    }
   }
 
   void _handleRequestedTab() {
@@ -47,6 +86,8 @@ class _AppShellState extends State<AppShell> {
       _index = index;
       _loaded.add(index);
     });
+    LibraryLockController.instance.setActive(index == _libraryTab);
+    if (index == _libraryTab) _requestLibraryLock();
   }
 
   @override
@@ -67,7 +108,7 @@ class _AppShellState extends State<AppShell> {
               : const SizedBox.shrink(),
         ],
       ),
-      bottomNavigationBar: LinkyBottomBar(
+      bottomNavigationBar: CometBottomBar(
         index: _index,
         onTap: _openTab,
       ),
@@ -75,8 +116,8 @@ class _AppShellState extends State<AppShell> {
   }
 }
 
-class LinkyBottomBar extends StatefulWidget {
-  const LinkyBottomBar({
+class CometBottomBar extends StatefulWidget {
+  const CometBottomBar({
     super.key,
     required this.index,
     required this.onTap,
@@ -86,10 +127,10 @@ class LinkyBottomBar extends StatefulWidget {
   final ValueChanged<int> onTap;
 
   @override
-  State<LinkyBottomBar> createState() => _LinkyBottomBarState();
+  State<CometBottomBar> createState() => _CometBottomBarState();
 }
 
-class _LinkyBottomBarState extends State<LinkyBottomBar> {
+class _CometBottomBarState extends State<CometBottomBar> {
   @override
   void initState() {
     super.initState();

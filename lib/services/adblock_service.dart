@@ -248,7 +248,7 @@ class AdBlockService extends ChangeNotifier {
     await directory.create(recursive: true);
     final client = HttpClient()
       ..connectionTimeout = const Duration(seconds: 20)
-      ..userAgent = 'Linky/0.1 (Android)';
+      ..userAgent = 'Comet/0.1 (Android)';
     ProxyService.applyToClient(client);
     try {
       final text = await _download(client, uri);
@@ -282,7 +282,7 @@ class AdBlockService extends ChangeNotifier {
     await directory.create(recursive: true);
     final client = HttpClient()
       ..connectionTimeout = const Duration(seconds: 20)
-      ..userAgent = 'Linky/0.1 (Android)';
+      ..userAgent = 'Comet/0.1 (Android)';
     ProxyService.applyToClient(client);
     final configured = settings.adBlockListUrls.toSet();
     final nextEntries = <String, String>{
@@ -395,7 +395,7 @@ class AdBlockService extends ChangeNotifier {
           await client.getUrl(uri).timeout(const Duration(seconds: 25));
       request.headers
         ..set(HttpHeaders.acceptEncodingHeader, 'identity')
-        ..set(HttpHeaders.userAgentHeader, 'Linky/0.1 (Android)');
+        ..set(HttpHeaders.userAgentHeader, 'Comet/0.1 (Android)');
       final response =
           await request.close().timeout(const Duration(seconds: 25));
       if (response.statusCode < 200 || response.statusCode >= 300) {

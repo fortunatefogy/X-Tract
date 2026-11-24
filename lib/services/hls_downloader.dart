@@ -178,7 +178,7 @@ class HlsDownloader {
     final client = HttpClient()
       ..connectionTimeout = const Duration(seconds: 30)
       ..idleTimeout = const Duration(seconds: 30)
-      ..userAgent = 'Linky Android';
+      ..userAgent = 'Comet Android';
     ProxyService.applyToClient(client);
     await SecureDnsService.instance.configure(client);
     try {
@@ -301,7 +301,7 @@ class HlsDownloader {
     final client = HttpClient()
       ..connectionTimeout = const Duration(seconds: 20)
       ..idleTimeout = const Duration(seconds: 20)
-      ..userAgent = 'Linky Android';
+      ..userAgent = 'Comet Android';
     ProxyService.applyToClient(client);
     await SecureDnsService.instance.configure(client);
     try {

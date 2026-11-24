@@ -78,6 +78,7 @@ class SettingsService extends ChangeNotifier {
   bool _copyToPublicDownloads = false;
   bool _desktopMode = false;
   bool _appLockEnabled = false;
+  bool _libraryLockEnabled = false;
   bool _redirectPromptEnabled = true;
   bool _blockPopups = true;
   String _searchEngine = 'google';
@@ -118,6 +119,7 @@ class SettingsService extends ChangeNotifier {
   bool get copyToPublicDownloads => _copyToPublicDownloads;
   bool get desktopMode => _desktopMode;
   bool get appLockEnabled => _appLockEnabled;
+  bool get libraryLockEnabled => _libraryLockEnabled;
   bool get redirectPromptEnabled => _redirectPromptEnabled;
   bool get blockPopups => _blockPopups;
   String get searchEngine => _searchEngine;
@@ -282,6 +284,7 @@ class SettingsService extends ChangeNotifier {
               decoded['copy_to_public_downloads'] as bool? ?? false;
           _desktopMode = decoded['desktop_mode'] as bool? ?? false;
         _appLockEnabled = decoded['app_lock_enabled'] as bool? ?? false;
+          _libraryLockEnabled = decoded['library_lock_enabled'] as bool? ?? false;
           _redirectPromptEnabled =
               decoded['redirect_prompt_enabled'] as bool? ?? true;
           _blockPopups = decoded['block_popups'] as bool? ?? true;
@@ -518,6 +521,13 @@ class SettingsService extends ChangeNotifier {
     await _save();
   }
 
+  Future<void> setLibraryLockEnabled(bool value) async {
+    if (_libraryLockEnabled == value) return;
+    _libraryLockEnabled = value;
+    notifyListeners();
+    await _save();
+  }
+
   Future<void> setRedirectPromptEnabled(bool value) async {
     if (_redirectPromptEnabled == value) return;
     _redirectPromptEnabled = value;
@@ -658,7 +668,7 @@ class SettingsService extends ChangeNotifier {
     }
     final client = HttpClient()
       ..connectionTimeout = const Duration(seconds: 15)
-      ..userAgent = 'Linky Android';
+      ..userAgent = 'Comet Android';
     try {
       final request = await client.getUrl(url).timeout(
             const Duration(seconds: 20),
@@ -745,6 +755,7 @@ class SettingsService extends ChangeNotifier {
         'copy_to_public_downloads': _copyToPublicDownloads,
         'desktop_mode': _desktopMode,
         'app_lock_enabled': _appLockEnabled,
+        'library_lock_enabled': _libraryLockEnabled,
         'redirect_prompt_enabled': _redirectPromptEnabled,
         'block_popups': _blockPopups,
         'search_engine': _searchEngine,

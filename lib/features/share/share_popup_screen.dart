@@ -131,11 +131,11 @@ class _SharePopupScreenState extends State<SharePopupScreen>
       _selected.addAll(items.where((item) => item.isDownloadable).map(_key));
       if (items.isEmpty) {
         _error = failed == urls.length
-            ? 'Could not inspect this link. Open it in the Linky browser to sign in, then try again.'
-            : 'No downloadable media was found. Open it in the Linky browser to sign in, then try again.';
+            ? 'Could not inspect this link. Open it in the Comet browser to sign in, then try again.'
+            : 'No downloadable media was found. Open it in the Comet browser to sign in, then try again.';
       } else if (items.every((item) => !item.isDownloadable)) {
         _error =
-            'This media needs a login the sheet cannot use. Open it in the Linky browser, sign in, then download.';
+            'This media needs a login the sheet cannot use. Open it in the Comet browser, sign in, then download.';
       }
     });
   }
@@ -253,7 +253,7 @@ class _SharePopupScreenState extends State<SharePopupScreen>
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Linky share',
+                      Text('Comet share',
                           style: AppText.heading(17, weight: FontWeight.w800)),
                       Text(
                         _loading
@@ -306,7 +306,7 @@ class _SharePopupScreenState extends State<SharePopupScreen>
                         FilledButton.tonalIcon(
                           onPressed: _openBrowser,
                           icon: const Icon(Icons.public_rounded, size: 18),
-                          label: const Text('Open in Linky browser'),
+                          label: const Text('Open in Comet browser'),
                         ),
                     ],
                   ),

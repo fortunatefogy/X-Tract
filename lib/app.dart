@@ -1,12 +1,14 @@
+import 'package:animated_splash_screen/animated_splash_screen.dart';
 import 'package:flutter/material.dart';
-import 'package:local_auth/local_auth.dart';
+import 'package:page_transition/page_transition.dart';
 
 import 'features/share/share_host.dart';
+import 'services/biometric_auth.dart';
 import 'services/settings_service.dart';
 import 'theme/app_theme.dart';
 
-class _LinkyScrollBehavior extends MaterialScrollBehavior {
-  const _LinkyScrollBehavior();
+class _CometScrollBehavior extends MaterialScrollBehavior {
+  const _CometScrollBehavior();
 
   @override
   Widget buildOverscrollIndicator(
@@ -21,8 +23,8 @@ class _LinkyScrollBehavior extends MaterialScrollBehavior {
       const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics());
 }
 
-class LinkyApp extends StatelessWidget {
-  const LinkyApp({
+class CometApp extends StatelessWidget {
+  const CometApp({
     super.key,
     this.startInShareMode = false,
     this.initialShareText,
@@ -39,21 +41,64 @@ class LinkyApp extends StatelessWidget {
       builder: (context, _) {
         AppAccent.current = AppAccent.byId(settings.accentColor);
         return MaterialApp(
-          title: 'Linky',
+          title: 'Comet',
           debugShowCheckedModeBanner: false,
           themeMode: settings.themeMode,
           theme: AppTheme.light,
           darkTheme: AppTheme.dark,
           themeAnimationDuration: const Duration(milliseconds: 300),
           themeAnimationCurve: Curves.easeOutCubic,
-          scrollBehavior: const _LinkyScrollBehavior(),
+          scrollBehavior: const _CometScrollBehavior(),
           builder: (context, child) => _AppLockGate(child: child),
-          home: ShareHost(
-            startInShareMode: startInShareMode,
-            initialText: initialShareText,
-          ),
+          home: startInShareMode
+              ? ShareHost(
+                  startInShareMode: true,
+                  initialText: initialShareText,
+                )
+              : AnimatedSplashScreen(
+                  splash: const _SplashBrand(),
+                  nextScreen: const ShareHost(),
+                  backgroundColor: const Color(0xFF0F1017),
+                  duration: 900,
+                  animationDuration: const Duration(milliseconds: 400),
+                  splashTransition: SplashTransition.fadeTransition,
+                  pageTransitionType: PageTransitionType.fade,
+                  splashIconSize: 260,
+                ),
         );
       },
+    );
+  }
+}
+
+class _SplashBrand extends StatelessWidget {
+  const _SplashBrand();
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        const ClipOval(
+          child: Image(
+            image: AssetImage('assets/icon/cropped_circle_image.png'),
+            width: 120,
+            height: 120,
+            filterQuality: FilterQuality.medium,
+          ),
+        ),
+        const SizedBox(height: 16),
+        Text(
+          'Comet',
+          style: AppText.display(34, color: Colors.white),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'Browse. Detect. Save.',
+          style: AppText.body(13, color: const Color(0xFF9AA1B2)),
+        ),
+      ],
     );
   }
 }
@@ -69,9 +114,9 @@ class _AppLockGate extends StatefulWidget {
 
 class _AppLockGateState extends State<_AppLockGate>
     with WidgetsBindingObserver {
-  final _auth = LocalAuthentication();
   bool _locked = false;
   bool _authenticating = false;
+  bool _backgrounded = false;
   bool _enabledWhenLastBuilt = false;
   String? _authError;
 
@@ -94,17 +139,30 @@ class _AppLockGateState extends State<_AppLockGate>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed &&
-        SettingsService.instance.appLockEnabled) {
-      _lock();
+    // Biometric prompts only move the app to `inactive`. Locking on every
+    // resume would re-lock immediately after a successful unlock, so only
+    // treat a genuine background (`paused`/`hidden`) as leaving the app.
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden) {
+      // A biometric prompt pauses the activity too; do not treat that as the
+      // user leaving the app or we would re-lock right after unlocking.
+      if (!BiometricAuth.isAuthenticating && !BiometricAuth.justAuthenticated) {
+        _backgrounded = true;
+      }
+    } else if (state == AppLifecycleState.resumed) {
+      if (_backgrounded) {
+        _backgrounded = false;
+        if (SettingsService.instance.appLockEnabled &&
+            !BiometricAuth.isAuthenticating &&
+            !BiometricAuth.justAuthenticated) {
+          _lock();
+        }
+      }
     }
   }
 
   void _lock() {
-    if (!mounted || _locked) {
-      if (_locked) _authenticate();
-      return;
-    }
+    if (!mounted || _locked) return;
     setState(() => _locked = true);
     _authenticate();
   }
@@ -112,29 +170,18 @@ class _AppLockGateState extends State<_AppLockGate>
   Future<void> _authenticate() async {
     if (_authenticating || !mounted) return;
     _authenticating = true;
-    try {
-      final canCheck =
-          await _auth.canCheckBiometrics || await _auth.isDeviceSupported();
-      if (!canCheck) {
-        if (mounted) {
-          setState(() => _authError =
-              'No fingerprint, face, or screen lock is set up on this device. '
-                  'Set a screen lock in system settings, then tap Unlock.');
-        }
-        return;
-      }
-      final unlocked = await _auth.authenticate(
-        localizedReason: 'Confirm your identity to open Linky.',
-        options: const AuthenticationOptions(
-          stickyAuth: true,
-          biometricOnly: false,
-        ),
-      );
-      if (unlocked && mounted) setState(() => _locked = false);
-    } catch (_) {
-    } finally {
-      _authenticating = false;
-    }
+    final outcome = await BiometricAuth.authenticate(
+      'Confirm your identity to open Comet.',
+    );
+    _authenticating = false;
+    if (!mounted) return;
+    setState(() {
+      _locked = outcome != BiometricOutcome.success;
+      _authError = outcome == BiometricOutcome.unavailable
+          ? 'No fingerprint, face, or screen lock is set up on this device. '
+              'Set a screen lock in system settings, then tap Unlock.'
+          : null;
+    });
   }
 
   @override
@@ -162,7 +209,7 @@ class _AppLockGateState extends State<_AppLockGate>
               Icon(Icons.fingerprint_rounded,
                   size: 64, color: palette.foreground),
               const SizedBox(height: 18),
-              Text('Linky is locked',
+              Text('Comet is locked',
                   style: AppText.display(24, color: palette.foreground)),
               const SizedBox(height: 6),
               Text(

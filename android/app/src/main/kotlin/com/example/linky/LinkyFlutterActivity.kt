@@ -9,6 +9,9 @@ import android.content.ClipData
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.Matrix
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Build
 import android.os.Handler
@@ -26,6 +29,8 @@ import io.flutter.embedding.engine.FlutterEngineCache
 import io.flutter.embedding.engine.dart.DartExecutor
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
+import java.io.FileOutputStream
+import java.security.MessageDigest
 import java.util.concurrent.Executors
 import javax.crypto.Cipher
 import javax.crypto.spec.IvParameterSpec
@@ -58,6 +63,7 @@ abstract class LinkyFlutterActivity : FlutterFragmentActivity() {
     private var pendingBrowserUrl: String? = null
     private var shareChannel: MethodChannel? = null
     private val extractorExecutor = Executors.newSingleThreadExecutor()
+    private val thumbnailExecutor = Executors.newFixedThreadPool(2)
 
     protected open val shareModeName: String get() = "main"
     protected open val supportsShare: Boolean get() = false
@@ -383,6 +389,29 @@ abstract class LinkyFlutterActivity : FlutterFragmentActivity() {
                                     error.message ?: "The tracks could not be merged.",
                                     null,
                                 )
+                            }
+                        }
+                    }
+                    "getVideoThumbnail" -> {
+                        val path = call.argument<String>("path")
+                        val maxSize = call.argument<Int>("maxSize") ?: 256
+                        if (path == null) {
+                            result.error("invalid_path", "A file path is required.", null)
+                        } else {
+                            thumbnailExecutor.execute {
+                                try {
+                                    val output = videoThumbnail(File(path), maxSize)
+                                    runOnUiThread { result.success(output) }
+                                } catch (error: Exception) {
+                                    runOnUiThread {
+                                        result.error(
+                                            "thumbnail_failed",
+                                            error.message
+                                                ?: "The thumbnail could not be created.",
+                                            null,
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -723,7 +752,7 @@ abstract class LinkyFlutterActivity : FlutterFragmentActivity() {
         val values = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
             put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
-            put(MediaStore.MediaColumns.RELATIVE_PATH, "Download/Linky")
+            put(MediaStore.MediaColumns.RELATIVE_PATH, "Download/Comet")
             put(MediaStore.MediaColumns.IS_PENDING, 1)
         }
         val collection =
@@ -746,6 +775,68 @@ abstract class LinkyFlutterActivity : FlutterFragmentActivity() {
             resolver.delete(destination, null, null)
             throw error
         }
+    }
+
+    private fun videoThumbnail(file: File, maxSize: Int): String? {
+        if (!file.isFile) return null
+        val size = maxSize.coerceIn(48, 1024)
+        val directory = File(cacheDir, "video_thumbs").apply { mkdirs() }
+        val key = hashOf(
+            "${file.absolutePath}|${file.lastModified()}|${file.length()}|$size",
+        )
+        val target = File(directory, "$key.jpg")
+        if (target.isFile && target.length() > 0) return target.absolutePath
+
+        val retriever = MediaMetadataRetriever()
+        try {
+            retriever.setDataSource(file.absolutePath)
+            val frame = retriever.getFrameAtTime(
+                0,
+                MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
+            ) ?: retriever.frameAtTime ?: return null
+
+            val rotation = retriever
+                .extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)
+                ?.toIntOrNull() ?: 0
+            val rotated = if (rotation % 360 != 0) {
+                val matrix = Matrix().apply { postRotate(rotation.toFloat()) }
+                Bitmap.createBitmap(frame, 0, 0, frame.width, frame.height, matrix, true)
+            } else {
+                frame
+            }
+
+            val longest = maxOf(rotated.width, rotated.height)
+            val scaled = if (longest > size && longest > 0) {
+                val ratio = size.toFloat() / longest
+                Bitmap.createScaledBitmap(
+                    rotated,
+                    (rotated.width * ratio).toInt().coerceAtLeast(1),
+                    (rotated.height * ratio).toInt().coerceAtLeast(1),
+                    true,
+                )
+            } else {
+                rotated
+            }
+
+            FileOutputStream(target).use { output ->
+                scaled.compress(Bitmap.CompressFormat.JPEG, 82, output)
+            }
+
+            if (scaled !== frame && !scaled.isRecycled) scaled.recycle()
+            if (rotated !== frame && rotated !== scaled && !rotated.isRecycled) {
+                rotated.recycle()
+            }
+            if (!frame.isRecycled) frame.recycle()
+
+            return if (target.isFile && target.length() > 0) target.absolutePath else null
+        } finally {
+            retriever.release()
+        }
+    }
+
+    private fun hashOf(value: String): String {
+        val digest = MessageDigest.getInstance("MD5").digest(value.toByteArray())
+        return digest.joinToString("") { "%02x".format(it.toInt() and 0xff) }
     }
 
     private fun saveToGallery(file: File): Uri {
@@ -773,7 +864,7 @@ abstract class LinkyFlutterActivity : FlutterFragmentActivity() {
         } else {
             MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
         }
-        val relativePath = if (isVideo) "Movies/Linky" else "Pictures/Linky"
+        val relativePath = if (isVideo) "Movies/Comet" else "Pictures/Comet"
         val values = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, file.name)
             put(MediaStore.MediaColumns.MIME_TYPE, mimeType)

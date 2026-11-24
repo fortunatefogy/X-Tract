@@ -33,7 +33,7 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('Clear bookmarks?'),
-        content: const Text('This removes every saved bookmark from Linky.'),
+        content: const Text('This removes every saved bookmark from Comet.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
@@ -121,7 +121,7 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
                         : Icons.search_off_rounded,
                     title: query.isEmpty ? 'No bookmarks yet' : 'No matches',
                     message: query.isEmpty
-                        ? 'Bookmark pages from the Linky browser to keep them here.'
+                        ? 'Bookmark pages from the Comet browser to keep them here.'
                         : 'Try a different title or address.',
                   ),
                 )

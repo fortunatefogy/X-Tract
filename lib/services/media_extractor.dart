@@ -62,7 +62,7 @@ class MediaExtractor {
     }
     final client = HttpClient()
       ..connectionTimeout = const Duration(seconds: 10)
-      ..userAgent = 'Linky Android';
+      ..userAgent = 'Comet Android';
     ProxyService.applyToClient(client);
     await SecureDnsService.instance.configure(client);
     try {
@@ -257,7 +257,7 @@ class MediaExtractor {
 
     final client = HttpClient()
       ..connectionTimeout = const Duration(seconds: 10)
-      ..userAgent = 'Linky Android';
+      ..userAgent = 'Comet Android';
     ProxyService.applyToClient(client);
     await SecureDnsService.instance.configure(client);
     try {

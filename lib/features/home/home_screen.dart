@@ -161,10 +161,10 @@ class _HomeScreenState extends State<HomeScreen> {
         } else if (found.values.every((item) => !item.isDownloadable) &&
             engineUnavailable) {
           _error =
-              'On-device yt-dlp could not extract this page. The source may not be supported, or may require access Linky cannot use.';
+              'On-device yt-dlp could not extract this page. The source may not be supported, or may require access Comet cannot use.';
         } else if (found.values.every((item) => !item.isDownloadable)) {
           _error =
-              'No playable format was found. If the page needs a login, open it in the Linky browser, sign in, then scan again.';
+              'No playable format was found. If the page needs a login, open it in the Comet browser, sign in, then scan again.';
         } else if (failed > 0) {
           _error =
               'Found media from ${urls.length - failed} of ${urls.length} links.';
@@ -541,7 +541,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 _InfoPanel(
                   icon: Icons.shield_outlined,
                   message:
-                      'Only public media the source makes accessible can be downloaded. Linky does not bypass logins, DRM, or access controls.',
+                      'Only public media the source makes accessible can be downloaded. Comet does not bypass logins, DRM, or access controls.',
                 ),
               ],
             ),

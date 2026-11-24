@@ -33,7 +33,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('Clear history?'),
-        content: const Text('This removes every visited page from Linky.'),
+        content: const Text('This removes every visited page from Comet.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
@@ -132,7 +132,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                         : Icons.search_off_rounded,
                     title: query.isEmpty ? 'No history yet' : 'No matches',
                     message: query.isEmpty
-                        ? 'Pages you open in the Linky browser appear here.'
+                        ? 'Pages you open in the Comet browser appear here.'
                         : 'Try a different title or address.',
                   ),
                 )

@@ -6,7 +6,7 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
 import '../models/media_item.dart';
 
-/// Calls the yt-dlp engine packaged inside Linky's Android application.
+/// Calls the yt-dlp engine packaged inside Comet's Android application.
 class PlatformExtractor {
   static const _channel = MethodChannel('linky/extractor');
   static final _progressListeners = <String, void Function(double)>{};

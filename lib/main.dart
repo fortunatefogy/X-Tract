@@ -27,7 +27,7 @@ void main(List<String> args) async {
     await SettingsService.instance.init();
     await StorageService.instance.init();
     runApp(
-      LinkyApp(
+      CometApp(
         startInShareMode: true,
         initialShareText: sharedText,
       ),
@@ -38,7 +38,7 @@ void main(List<String> args) async {
 
   await SettingsService.instance.init();
   await StorageService.instance.init();
-  runApp(const LinkyApp());
+  runApp(const CometApp());
   unawaited(_initRemaining());
 }
 
