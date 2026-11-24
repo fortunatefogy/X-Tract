@@ -12,6 +12,7 @@ import 'chunked_downloader.dart';
 import 'dash_downloader.dart';
 import 'device_resources.dart';
 import 'hls_downloader.dart';
+import 'library_folders.dart';
 import 'media_downloader.dart';
 import 'notification_service.dart';
 import 'platform_extractor.dart';
@@ -305,7 +306,9 @@ class DownloadService extends ChangeNotifier {
       headers['User-Agent'] = 'Comet/0.1 (Android)';
     }
 
-    final cleanFolder = LibraryFolders.normalize(folder);
+    final cleanFolder = LibraryFolders.normalize(
+      folder ?? SettingsService.instance.downloadFolder,
+    );
     final targetFolder = cleanFolder.isEmpty ? null : cleanFolder;
     final filename = await _uniqueFilename(item, targetFolder);
     final taskId =
@@ -438,7 +441,7 @@ class DownloadService extends ChangeNotifier {
     await enqueue(
       media,
       extraHeaders: record.requestHeaders,
-      folder: record.folder,
+      folder: record.folder ?? '',
     );
   }
 
@@ -533,8 +536,12 @@ class DownloadService extends ChangeNotifier {
       if (item == null) continue;
       final key = '${item.url}|${item.formatId ?? ''}';
       if (!activeKeys.add(key)) continue;
+      final folder = entry['folder'];
       try {
-        await enqueue(item);
+        await enqueue(
+          item,
+          folder: folder is String ? folder : '',
+        );
         imported++;
       } catch (_) {}
     }
@@ -573,7 +580,9 @@ class DownloadService extends ChangeNotifier {
         url: record.url,
         headers: record.requestHeaders,
         filename: record.filename,
-        directory: _folder,
+        directory: record.folder == null || record.folder!.isEmpty
+            ? _folder
+            : '$_folder/${record.folder}',
         baseDirectory: BaseDirectory.applicationDocuments,
         group: _group,
         updates: Updates.statusAndProgress,
@@ -846,7 +855,7 @@ class DownloadService extends ChangeNotifier {
   ) async {
     final id = record.taskId;
     try {
-      final directory = await _directory();
+      final directory = await _directory(record.folder);
       final destination = File(
         '${directory.path}${Platform.pathSeparator}${record.filename}',
       );
@@ -947,7 +956,7 @@ class DownloadService extends ChangeNotifier {
         );
       }
       if (handle.canceled) {
-        final directory = await _directory();
+        final directory = await _directory(record.folder);
         try {
           await Directory(
             '${directory.path}${Platform.pathSeparator}.linky-hls'
@@ -978,7 +987,7 @@ class DownloadService extends ChangeNotifier {
   ) async {
     final id = record.taskId;
     try {
-      final directory = await _directory();
+      final directory = await _directory(record.folder);
       final destination = File(
         '${directory.path}${Platform.pathSeparator}${record.filename}',
       );
@@ -1048,7 +1057,7 @@ class DownloadService extends ChangeNotifier {
         );
       }
       if (handle.canceled) {
-        final directory = await _directory();
+        final directory = await _directory(record.folder);
         try {
           await Directory(
             '${directory.path}${Platform.pathSeparator}.linky-dash'
@@ -1079,7 +1088,7 @@ class DownloadService extends ChangeNotifier {
   ) async {
     final id = record.taskId;
     try {
-      final directory = await _directory();
+      final directory = await _directory(record.folder);
       final destination = File(
         '${directory.path}${Platform.pathSeparator}${record.filename}',
       );
@@ -1145,7 +1154,7 @@ class DownloadService extends ChangeNotifier {
         );
       }
       if (handle.canceled) {
-        final directory = await _directory();
+        final directory = await _directory(record.folder);
         try {
           await Directory(
             '${directory.path}${Platform.pathSeparator}.linky-parts'
@@ -1181,7 +1190,7 @@ class DownloadService extends ChangeNotifier {
     );
     _notify(force: true);
     try {
-      final directory = await _directory();
+      final directory = await _directory(record.folder);
       final cookieText =
           await PlatformExtractor().cookieTextFor(current.sourcePage!);
       final file = await PlatformExtractor().download(
@@ -1337,8 +1346,17 @@ class DownloadService extends ChangeNotifier {
     return null;
   }
 
-  Future<Directory> _directory() async =>
-      StorageService.instance.downloadDirectory();
+  Future<Directory> _directory([String? folder]) async {
+    final root = await StorageService.instance.downloadDirectory();
+    final clean = LibraryFolders.normalize(folder);
+    if (clean.isEmpty) return root;
+    final directory = Directory(
+      '${root.path}${Platform.pathSeparator}'
+      '${clean.split('/').join(Platform.pathSeparator)}',
+    );
+    await directory.create(recursive: true);
+    return directory;
+  }
 
   Future<void> relocateDownloads(String targetPath) async {
     for (final record in _records.values.toList()) {
@@ -1356,12 +1374,12 @@ class DownloadService extends ChangeNotifier {
   }
 
   Future<String> _pathFor(DownloadRecord record) async {
-    final directory = await _directory();
+    final directory = await _directory(record.folder);
     return '${directory.path}${Platform.pathSeparator}${record.filename}';
   }
 
-  Future<String> _uniqueFilename(MediaItem item) async {
-    final directory = await _directory();
+  Future<String> _uniqueFilename(MediaItem item, [String? folder]) async {
+    final directory = await _directory(folder);
     final base = MediaDownloader.sanitizeFilename(_baseName(item));
     final name = _ensureExtension(base, item);
     final reserved = _records.values

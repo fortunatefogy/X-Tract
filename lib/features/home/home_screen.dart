@@ -15,6 +15,7 @@ import '../../widgets/motion.dart';
 import '../bookmarks/bookmarks_screen.dart';
 import '../browser/media_browser_screen.dart';
 import '../history/history_screen.dart';
+import '../library/folder_picker.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key, this.onOpenTab});
@@ -1251,39 +1252,49 @@ class _DownloadBar extends StatelessWidget {
         borderRadius: BorderRadius.circular(AppRadius.pill),
         border: Border.all(color: palette.border),
       ),
-      child: Row(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.only(left: 12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    '$count selected${sizeLabel != null ? ' · $sizeLabel' : ''}',
-                    style: AppText.body(13, weight: FontWeight.w700),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 1),
-                  Text('Ready to queue',
-                      style: AppText.body(10, color: palette.mutedForeground)),
-                ],
-              ),
-            ),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 4),
+            child: FolderSelector(),
           ),
-          FilledButton.icon(
-            onPressed: onDownload,
-            icon: busy
-                ? const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(
-                        strokeWidth: 2, color: Colors.white),
-                  )
-                : const Icon(Icons.download_rounded, size: 18),
-            label: const Text('Download'),
+          Row(
+            children: [
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.only(left: 12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        '$count selected${sizeLabel != null ? ' · $sizeLabel' : ''}',
+                        style: AppText.body(13, weight: FontWeight.w700),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 1),
+                      Text('Ready to queue',
+                          style: AppText.body(10,
+                              color: palette.mutedForeground)),
+                    ],
+                  ),
+                ),
+              ),
+              FilledButton.icon(
+                onPressed: onDownload,
+                icon: busy
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: Colors.white),
+                      )
+                    : const Icon(Icons.download_rounded, size: 18),
+                label: const Text('Download'),
+              ),
+            ],
           ),
         ],
       ),

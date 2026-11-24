@@ -75,6 +75,7 @@ class SettingsService extends ChangeNotifier {
   bool _repairStreams = false;
   bool _audioOnlyDownloads = false;
   String _downloadLocation = 'app';
+  String _downloadFolder = '';
   bool _copyToPublicDownloads = false;
   bool _desktopMode = false;
   bool _appLockEnabled = false;
@@ -116,6 +117,7 @@ class SettingsService extends ChangeNotifier {
   bool get repairStreams => _repairStreams;
   bool get audioOnlyDownloads => _audioOnlyDownloads;
   String get downloadLocation => _downloadLocation;
+  String get downloadFolder => _downloadFolder;
   bool get copyToPublicDownloads => _copyToPublicDownloads;
   bool get desktopMode => _desktopMode;
   bool get appLockEnabled => _appLockEnabled;
@@ -280,6 +282,9 @@ class SettingsService extends ChangeNotifier {
           if (!{'app', 'external', 'sd'}.contains(_downloadLocation)) {
             _downloadLocation = 'app';
           }
+          _downloadFolder = _normalizeFolder(
+            decoded['download_folder'] as String? ?? '',
+          );
           _copyToPublicDownloads =
               decoded['copy_to_public_downloads'] as bool? ?? false;
           _desktopMode = decoded['desktop_mode'] as bool? ?? false;
@@ -488,6 +493,20 @@ class SettingsService extends ChangeNotifier {
   Future<void> setAudioOnlyDownloads(bool value) async {
     if (_audioOnlyDownloads == value) return;
     _audioOnlyDownloads = value;
+    notifyListeners();
+    await _save();
+  }
+
+  static String _normalizeFolder(String value) => value
+      .split('/')
+      .map((segment) => segment.trim())
+      .where((segment) => segment.isNotEmpty && segment != '.')
+      .join('/');
+
+  Future<void> setDownloadFolder(String value) async {
+    final normalized = _normalizeFolder(value);
+    if (_downloadFolder == normalized) return;
+    _downloadFolder = normalized;
     notifyListeners();
     await _save();
   }
@@ -752,6 +771,7 @@ class SettingsService extends ChangeNotifier {
         'repair_streams': _repairStreams,
         'audio_only_downloads': _audioOnlyDownloads,
         'download_location': _downloadLocation,
+        'download_folder': _downloadFolder,
         'copy_to_public_downloads': _copyToPublicDownloads,
         'desktop_mode': _desktopMode,
         'app_lock_enabled': _appLockEnabled,

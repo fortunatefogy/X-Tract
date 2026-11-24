@@ -8,6 +8,7 @@ import '../../services/platform_extractor.dart';
 import '../../services/settings_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/media_thumbnail.dart';
+import '../library/folder_picker.dart';
 
 class SharePopupScreen extends StatefulWidget {
   const SharePopupScreen({
@@ -387,24 +388,35 @@ class _SharePopupScreenState extends State<SharePopupScreen>
             top: false,
             child: Padding(
               padding: const EdgeInsets.fromLTRB(20, 8, 20, 14),
-              child: SizedBox(
-                width: double.infinity,
-                child: FilledButton.icon(
-                  onPressed: chosenCount == 0 || _queueing ? null : _download,
-                  icon: _queueing
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(
-                              strokeWidth: 2, color: Colors.white),
-                        )
-                      : const Icon(Icons.download_rounded, size: 18),
-                  label: Text(
-                    chosenCount == 0
-                        ? 'Select media to download'
-                        : 'Download $chosenCount · runs in background',
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Align(
+                    alignment: Alignment.centerLeft,
+                    child: FolderSelector(),
                   ),
-                ),
+                  const SizedBox(height: 4),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed:
+                          chosenCount == 0 || _queueing ? null : _download,
+                      icon: _queueing
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2, color: Colors.white),
+                            )
+                          : const Icon(Icons.download_rounded, size: 18),
+                      label: Text(
+                        chosenCount == 0
+                            ? 'Select media to download'
+                            : 'Download $chosenCount · runs in background',
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
           ),

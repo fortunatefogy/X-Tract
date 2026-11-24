@@ -6,14 +6,15 @@ import '../../services/biometric_auth.dart';
 import '../../services/device_media_channel.dart';
 import '../../services/device_resources.dart';
 import '../../services/download_service.dart';
+import '../../services/library_folders.dart';
 import '../../services/library_lock.dart';
 import '../../services/media_downloader.dart';
 import '../../services/settings_service.dart';
-import '../../services/storage_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/app_ui.dart';
 import '../../widgets/media_thumbnail.dart';
 import '../downloads/video_playback_screen.dart';
+import 'folder_picker.dart';
 
 class LibraryScreen extends StatefulWidget {
   const LibraryScreen({super.key});
@@ -25,6 +26,7 @@ class LibraryScreen extends StatefulWidget {
 class _LibraryData {
   const _LibraryData({
     required this.files,
+    required this.folders,
     required this.totalBytes,
     required this.bytesByType,
     required this.sizeByPath,
@@ -33,6 +35,7 @@ class _LibraryData {
   });
 
   final List<File> files;
+  final List<LibraryFolder> folders;
   final int totalBytes;
   final Map<String, int> bytesByType;
   final Map<String, int> sizeByPath;
@@ -47,6 +50,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
   late Future<_LibraryData> _data;
   bool _selecting = false;
   String _filter = 'all';
+  String _folder = '';
   String _completedSignature = '';
   bool _locked = false;
   bool _authenticating = false;
@@ -143,7 +147,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }
 
   Future<_LibraryData> _loadData() async {
-    final directory = await StorageService.instance.downloadDirectory();
+    final directory = await LibraryFolders.instance.directoryFor(_folder);
+    final folders = await LibraryFolders.instance.children(_folder);
     final files = <File>[];
     if (await directory.exists()) {
       try {
@@ -189,6 +194,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
     final info = await DeviceResources.instance.storageInfo();
     return _LibraryData(
       files: available,
+      folders: folders,
       totalBytes: total,
       bytesByType: byType,
       sizeByPath: sizeByPath,
@@ -396,6 +402,198 @@ class _LibraryScreenState extends State<LibraryScreen> {
         .showSnackBar(SnackBar(content: Text(message)));
   }
 
+  void _reload() => setState(() => _data = _loadData());
+
+  void _openFolder(LibraryFolder folder) {
+    setState(() {
+      _folder = folder.relativePath;
+      _filter = 'all';
+      _selectedPaths.clear();
+      _selecting = false;
+      _data = _loadData();
+    });
+  }
+
+  void _goUp() {
+    final parent = _folder.contains('/')
+        ? _folder.substring(0, _folder.lastIndexOf('/'))
+        : '';
+    setState(() {
+      _folder = parent;
+      _filter = 'all';
+      _selectedPaths.clear();
+      _selecting = false;
+      _data = _loadData();
+    });
+  }
+
+  Future<void> _createFolder() async {
+    final controller = TextEditingController();
+    final name = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('New folder'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          textCapitalization: TextCapitalization.sentences,
+          decoration: const InputDecoration(hintText: 'Folder name'),
+          onSubmitted: (value) => Navigator.of(dialogContext).pop(value),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () =>
+                Navigator.of(dialogContext).pop(controller.text.trim()),
+            child: const Text('Create'),
+          ),
+        ],
+      ),
+    );
+    if (name == null || name.trim().isEmpty || !mounted) return;
+    try {
+      await LibraryFolders.instance.create(name, parent: _folder);
+      if (!mounted) return;
+      _reload();
+      _toast('Folder created');
+    } on FileSystemException catch (error) {
+      _toast('Could not create folder: ${error.message}');
+    }
+  }
+
+  Future<void> _renameFolder(LibraryFolder folder) async {
+    final controller = TextEditingController(text: folder.name);
+    final name = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Rename folder'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          textCapitalization: TextCapitalization.sentences,
+          decoration: const InputDecoration(hintText: 'Folder name'),
+          onSubmitted: (value) => Navigator.of(dialogContext).pop(value),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () =>
+                Navigator.of(dialogContext).pop(controller.text.trim()),
+            child: const Text('Rename'),
+          ),
+        ],
+      ),
+    );
+    if (name == null || name.trim().isEmpty || !mounted) return;
+    try {
+      await LibraryFolders.instance.rename(folder, name);
+      if (!mounted) return;
+      _reload();
+      _toast('Folder renamed');
+    } on FileSystemException catch (error) {
+      _toast('Could not rename folder: ${error.message}');
+    }
+  }
+
+  Future<void> _deleteFolder(LibraryFolder folder) async {
+    final empty = await LibraryFolders.instance.isEmpty(folder);
+    if (!mounted) return;
+    final confirmed = await _confirm(
+      'Delete folder?',
+      empty
+          ? '"${folder.name}" will be removed.'
+          : '"${folder.name}" and everything inside it will be permanently '
+              'removed.',
+    );
+    if (confirmed != true || !mounted) return;
+    try {
+      await LibraryFolders.instance.delete(folder);
+      if (!mounted) return;
+      _reload();
+      _toast('Folder deleted');
+    } on FileSystemException catch (error) {
+      _toast('Could not delete folder: ${error.message}');
+    }
+  }
+
+  Future<void> _folderOptions(LibraryFolder folder) async {
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.drive_file_rename_outline_rounded),
+              title: const Text('Rename folder'),
+              onTap: () => Navigator.of(sheetContext).pop('rename'),
+            ),
+            ListTile(
+              leading: Icon(Icons.delete_outline_rounded,
+                  color: context.palette.destructive),
+              title: Text('Delete folder',
+                  style: TextStyle(color: context.palette.destructive)),
+              onTap: () => Navigator.of(sheetContext).pop('delete'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (action == 'rename') await _renameFolder(folder);
+    if (action == 'delete') await _deleteFolder(folder);
+  }
+
+  Future<void> _moveFile(File file) async {
+    final target = await showFolderPicker(context, selected: _folder);
+    if (target == null || target == _folder || !mounted) return;
+    try {
+      await LibraryFolders.instance.moveFile(file, target);
+      if (!mounted) return;
+      setState(() {
+        _selectedPaths.remove(file.path);
+        _data = _loadData();
+      });
+      _toast('File moved');
+    } on FileSystemException catch (error) {
+      _toast('Could not move the file: ${error.message}');
+    }
+  }
+
+  Future<void> _moveSelected() async {
+    final paths = _selectedPaths
+        .where((path) => File(path).existsSync())
+        .toList(growable: false);
+    if (paths.isEmpty) return;
+    final target = await showFolderPicker(context, selected: _folder);
+    if (target == null || target == _folder || !mounted) return;
+    var moved = 0;
+    var failed = 0;
+    for (final path in paths) {
+      try {
+        await LibraryFolders.instance.moveFile(File(path), target);
+        moved++;
+      } on FileSystemException {
+        failed++;
+      }
+    }
+    if (!mounted) return;
+    setState(() {
+      _selectedPaths.clear();
+      _selecting = false;
+      _data = _loadData();
+    });
+    _toast(failed == 0
+        ? 'Moved $moved file${moved == 1 ? '' : 's'}'
+        : 'Moved $moved; $failed could not be moved');
+  }
+
   void _play(File file) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
@@ -536,6 +734,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
             final data = snapshot.data ??
                 const _LibraryData(
                   files: [],
+                  folders: [],
                   totalBytes: 0,
                   bytesByType: {},
                   sizeByPath: {},
@@ -589,6 +788,16 @@ class _LibraryScreenState extends State<LibraryScreen> {
                             Row(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
+                                if (_folder.isNotEmpty)
+                                  Padding(
+                                    padding: const EdgeInsets.only(
+                                        right: 6, top: 2),
+                                    child: RoundIconButton(
+                                      icon: Icons.arrow_back_rounded,
+                                      tooltip: 'Back',
+                                      onPressed: _goUp,
+                                    ),
+                                  ),
                                 Expanded(
                                   child: Column(
                                     crossAxisAlignment:
@@ -599,13 +808,26 @@ class _LibraryScreenState extends State<LibraryScreen> {
                                               color: palette.foreground)),
                                       const SizedBox(height: 2),
                                       Text(
-                                        'Your saved media, available offline.',
+                                        _folder.isEmpty
+                                            ? 'Your saved media, available offline.'
+                                            : _folder.split('/').join(' / '),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
                                         style: AppText.body(13,
                                             color: palette.mutedForeground),
                                       ),
                                     ],
                                   ),
                                 ),
+                                if (!_selecting)
+                                  Padding(
+                                    padding: const EdgeInsets.only(right: 8),
+                                    child: RoundIconButton(
+                                      icon: Icons.create_new_folder_outlined,
+                                      tooltip: 'New folder',
+                                      onPressed: _createFolder,
+                                    ),
+                                  ),
                                 if (_selecting)
                                   Padding(
                                     padding: const EdgeInsets.only(right: 8),
@@ -658,6 +880,21 @@ class _LibraryScreenState extends State<LibraryScreen> {
                               onChanged: (value) =>
                                   setState(() => _filter = value),
                             ),
+                            if (_filter == 'all' && data.folders.isNotEmpty) ...[
+                              const SizedBox(height: 16),
+                              Text('Folders',
+                                  style: AppText.label(11,
+                                      color: palette.mutedForeground)),
+                              const SizedBox(height: 10),
+                              Wrap(
+                                spacing: 10,
+                                runSpacing: 10,
+                                children: [
+                                  for (final folder in data.folders)
+                                    _folderChip(folder),
+                                ],
+                              ),
+                            ],
                             const SizedBox(height: 14),
                           ]),
                         ),
@@ -669,7 +906,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
                             child: Center(child: CircularProgressIndicator()),
                           ),
                         )
-                      else if (files.isEmpty)
+                      else if (files.isEmpty &&
+                          (_filter != 'all' || data.folders.isEmpty))
                         SliverPadding(
                           padding: const EdgeInsets.symmetric(horizontal: 20),
                           sliver: SliverToBoxAdapter(
@@ -722,13 +960,54 @@ class _LibraryScreenState extends State<LibraryScreen> {
                       onSave: _selectedPaths.isEmpty
                           ? null
                           : _saveSelectedToGallery,
-                      onShare: _selectedPaths.isEmpty ? null : _shareSelected,
-                      onDelete: _selectedPaths.isEmpty ? null : _deleteSelected,
+                       onShare: _selectedPaths.isEmpty ? null : _shareSelected,
+                       onMove: _selectedPaths.isEmpty ? null : _moveSelected,
+                       onDelete: _selectedPaths.isEmpty ? null : _deleteSelected,
                     ),
                   ),
               ],
             );
           },
+        ),
+      ),
+    );
+  }
+
+  Widget _folderChip(LibraryFolder folder) {
+    final palette = context.palette;
+    return GestureDetector(
+      onTap: () => _openFolder(folder),
+      onLongPress: () => _folderOptions(folder),
+      child: Container(
+        width: 150,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        decoration: BoxDecoration(
+          color: palette.card,
+          borderRadius: BorderRadius.circular(AppRadius.card),
+          border: Border.all(color: palette.border),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.folder_rounded, size: 22, color: AppColors.primary),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                folder.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: AppText.body(12, weight: FontWeight.w700),
+              ),
+            ),
+            GestureDetector(
+              onTap: () => _folderOptions(folder),
+              behavior: HitTestBehavior.opaque,
+              child: Padding(
+                padding: const EdgeInsets.only(left: 4),
+                child: Icon(Icons.more_vert_rounded,
+                    size: 16, color: palette.mutedForeground),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -842,6 +1121,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                   if (value == 'play') _play(file);
                   if (value == 'share') _share(file);
                   if (value == 'open') _openWith(file);
+                  if (value == 'move') _moveFile(file);
                   if (value == 'rename') _rename(file);
                   if (value == 'delete') _delete(file);
                 },
@@ -850,6 +1130,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
                     const PopupMenuItem(value: 'play', child: Text('Play')),
                   const PopupMenuItem(value: 'share', child: Text('Share')),
                   const PopupMenuItem(value: 'open', child: Text('Open with')),
+                  const PopupMenuItem(
+                      value: 'move', child: Text('Move to folder')),
                   const PopupMenuItem(value: 'rename', child: Text('Rename')),
                   const PopupMenuItem(value: 'delete', child: Text('Delete')),
                 ],
@@ -1070,6 +1352,7 @@ class _SelectionBar extends StatelessWidget {
     required this.onSelectAll,
     required this.onSave,
     required this.onShare,
+    required this.onMove,
     required this.onDelete,
   });
 
@@ -1079,6 +1362,7 @@ class _SelectionBar extends StatelessWidget {
   final VoidCallback? onSelectAll;
   final VoidCallback? onSave;
   final VoidCallback? onShare;
+  final VoidCallback? onMove;
   final VoidCallback? onDelete;
 
   @override
@@ -1121,28 +1405,35 @@ class _SelectionBar extends StatelessWidget {
             icon:
                 allSelected ? Icons.deselect_rounded : Icons.select_all_rounded,
             tooltip: allSelected ? 'Deselect all' : 'Select all',
-            size: 40,
+            size: 38,
             onPressed: onSelectAll,
           ),
-          const SizedBox(width: 6),
+          const SizedBox(width: 4),
           RoundIconButton(
             icon: Icons.photo_library_outlined,
             tooltip: 'Save to Gallery',
-            size: 40,
+            size: 38,
             onPressed: onSave,
           ),
-          const SizedBox(width: 6),
+          const SizedBox(width: 4),
+          RoundIconButton(
+            icon: Icons.drive_file_move_outline,
+            tooltip: 'Move to folder',
+            size: 38,
+            onPressed: onMove,
+          ),
+          const SizedBox(width: 4),
           RoundIconButton(
             icon: Icons.share_rounded,
             tooltip: 'Share selected',
-            size: 40,
+            size: 38,
             onPressed: onShare,
           ),
-          const SizedBox(width: 6),
+          const SizedBox(width: 4),
           RoundIconButton(
             icon: Icons.delete_outline_rounded,
             tooltip: 'Delete selected',
-            size: 40,
+            size: 38,
             color: palette.destructive,
             onPressed: onDelete,
           ),

@@ -31,6 +31,7 @@ import '../downloads/downloads_screen.dart';
 import 'browser_home_page.dart';
 import '../downloads/remote_preview_screen.dart';
 import '../history/history_screen.dart';
+import '../library/folder_picker.dart';
 import '../settings/settings_screen.dart';
 
 class MediaBrowserScreen extends StatefulWidget {
@@ -2954,6 +2955,10 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
                           ),
                         ],
                       ),
+                    ),
+                    const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 12),
+                      child: FolderSelector(),
                     ),
                     SwitchListTile(
                       title:
