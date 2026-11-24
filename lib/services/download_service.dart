@@ -60,6 +60,7 @@ class DownloadRecord {
     this.fallbackAttempted = false,
     this.requiresExtractor = false,
     this.isLive = false,
+    this.folder,
   });
 
   final String taskId;
@@ -84,6 +85,9 @@ class DownloadRecord {
   final bool requiresExtractor;
   final bool isLive;
 
+  /// Relative library folder for this download, or null for the root.
+  final String? folder;
+
   DownloadRecord copyWith({
     String? taskId,
     String? filename,
@@ -96,6 +100,7 @@ class DownloadRecord {
     Map<String, String>? requestHeaders,
     bool? fallbackAttempted,
     bool? isLive,
+    Object? folder = _unset,
   }) =>
       DownloadRecord(
         taskId: taskId ?? this.taskId,
@@ -120,6 +125,7 @@ class DownloadRecord {
         fallbackAttempted: fallbackAttempted ?? this.fallbackAttempted,
         requiresExtractor: requiresExtractor,
         isLive: isLive ?? this.isLive,
+        folder: identical(folder, _unset) ? this.folder : folder as String?,
       );
 
   MediaItem toMediaItem() => MediaItem(
@@ -161,6 +167,7 @@ class DownloadRecord {
         'fallbackAttempted': fallbackAttempted,
         'requiresExtractor': requiresExtractor,
         'isLive': isLive,
+        'folder': folder,
       };
 
   factory DownloadRecord.fromJson(Map<String, dynamic> json) => DownloadRecord(
@@ -190,6 +197,7 @@ class DownloadRecord {
         fallbackAttempted: json['fallbackAttempted'] as bool? ?? false,
         requiresExtractor: json['requiresExtractor'] as bool? ?? false,
         isLive: json['isLive'] as bool? ?? false,
+        folder: json['folder'] as String?,
       );
 }
 
@@ -281,6 +289,7 @@ class DownloadService extends ChangeNotifier {
   Future<DownloadRecord> enqueue(
     MediaItem item, {
     Map<String, String> extraHeaders = const {},
+    String? folder,
   }) async {
     await init();
     if (!item.isDownloadable) {
@@ -296,7 +305,9 @@ class DownloadService extends ChangeNotifier {
       headers['User-Agent'] = 'Comet/0.1 (Android)';
     }
 
-    final filename = await _uniqueFilename(item);
+    final cleanFolder = LibraryFolders.normalize(folder);
+    final targetFolder = cleanFolder.isEmpty ? null : cleanFolder;
+    final filename = await _uniqueFilename(item, targetFolder);
     final taskId =
         '${DateTime.now().microsecondsSinceEpoch}-${_random.nextInt(1 << 20)}';
     final title = _displayTitle(item);
@@ -316,6 +327,7 @@ class DownloadService extends ChangeNotifier {
       mimeType: item.mimeType,
       requestHeaders: headers,
       requiresExtractor: item.requiresExtractor,
+      folder: targetFolder,
     );
     _records[taskId] = record;
     _notify(force: true);
@@ -422,8 +434,12 @@ class DownloadService extends ChangeNotifier {
     _resourceBlocked.remove(record.taskId);
     _notify(force: true);
     _schedulePersist();
-    await _deleteParts(record.taskId);
-    await enqueue(media, extraHeaders: record.requestHeaders);
+    await _deleteParts(record.taskId, folder: record.folder);
+    await enqueue(
+      media,
+      extraHeaders: record.requestHeaders,
+      folder: record.folder,
+    );
   }
 
   Future<void> pauseAll() async {
@@ -464,15 +480,20 @@ class DownloadService extends ChangeNotifier {
     }
   }
 
-  Future<void> _deleteParts(String taskId) async {
-    final directory = await _directory();
-    for (final name in ['.linky-parts', '.linky-hls', '.linky-dash']) {
-      try {
-        await Directory(
-          '${directory.path}${Platform.pathSeparator}$name'
-          '${Platform.pathSeparator}$taskId',
-        ).delete(recursive: true);
-      } catch (_) {}
+  Future<void> _deleteParts(String taskId, {String? folder}) async {
+    final directories = <Directory>[
+      await _directory(folder),
+      await _directory(),
+    ];
+    for (final directory in directories) {
+      for (final name in ['.linky-parts', '.linky-hls', '.linky-dash']) {
+        try {
+          await Directory(
+            '${directory.path}${Platform.pathSeparator}$name'
+            '${Platform.pathSeparator}$taskId',
+          ).delete(recursive: true);
+        } catch (_) {}
+      }
     }
   }
 
