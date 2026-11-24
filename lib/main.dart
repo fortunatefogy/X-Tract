@@ -32,7 +32,9 @@ void main(List<String> args) async {
         initialShareText: sharedText,
       ),
     );
-    unawaited(_initRemaining());
+    // The share popup runs in its own engine (separate from the main activity).
+    // Skip the download-manager init here so two isolates never track the same
+    // background tasks; DownloadService initialises lazily if a download starts.
     return;
   }
 

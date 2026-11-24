@@ -236,9 +236,13 @@ _IMAGE_HEADERS = {
 
 
 _FACEBOOK_HEADERS = {
-    "User-Agent": "Twitterbot/1.0",
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36"
+    ),
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://www.facebook.com/",
 }
 
 _FACEBOOK_CRAWLER_HEADERS = {
@@ -1224,9 +1228,13 @@ def _is_facebook_host(host):
 
 
 def _is_facebook_video_url(raw_url):
+    if not raw_url:
+        return False
     return bool(
         re.search(
-            r"/videos?/|/watch/?\?v=|/reel/|/share/v/|fb\.watch",
+            r"/videos?/|/reels?/|/watch(?:[/?]|$)|[?&]v=\d+|"
+            r"/share/(?:v|r|reel)/|/video\.php|/stor(?:y|ies)\.php|"
+            r"/permalink\.php|fb\.watch",
             raw_url,
             re.I,
         )
@@ -1262,12 +1270,68 @@ def _facebook_final_url(raw_url, cookie_text=""):
         return raw_url
 
 
+_FACEBOOK_VIDEO_KEYS = (
+    (
+        "HD",
+        (
+            "hd_src",
+            "playable_url_quality_hd",
+            "browser_native_hd_url",
+            "playable_url_hd",
+        ),
+    ),
+    (
+        "SD",
+        (
+            "sd_src",
+            "playable_url",
+            "browser_native_sd_url",
+            "playable_url_sd",
+        ),
+    ),
+)
+
+
+def _decode_facebook_url(value):
+    text = str(value or "")
+    for _ in range(2):
+        text = text.replace("\\/", "/")
+        text = (
+            text.replace("\\u0025", "%")
+            .replace("\\u0026", "&")
+            .replace("\\u003D", "=")
+            .replace("\\u003d", "=")
+        )
+        text = unescape(text).replace("\\/", "/")
+    return text.strip()
+
+
+def _facebook_video_sources(page):
+    sources = []
+    seen = set()
+    for label, keys in _FACEBOOK_VIDEO_KEYS:
+        for key in keys:
+            for match in re.finditer(rf'"{key}":"(https?:[^"]+)"', page):
+                media_url = _decode_facebook_url(match.group(1))
+                if not media_url.startswith(("http://", "https://")):
+                    continue
+                if media_url in seen:
+                    continue
+                seen.add(media_url)
+                sources.append((label, key, media_url))
+    return sources
+
+
 def _facebook_video_items(raw_url, cookie_text=""):
-    if not _is_facebook_video_url(raw_url):
+    resolved = _facebook_final_url(raw_url, cookie_text)
+    if not (
+        _is_facebook_video_url(raw_url) or _is_facebook_video_url(resolved)
+    ):
         return []
+    embed_target = resolved or raw_url
     embed_url = (
         "https://www.facebook.com/plugins/video.php?href="
-        + quote(raw_url, safe="")
+        + quote(embed_target, safe="")
         + "&show_text=false&width=720"
     )
     try:
@@ -1275,27 +1339,27 @@ def _facebook_video_items(raw_url, cookie_text=""):
             embed_url, _facebook_headers(_FACEBOOK_HEADERS, cookie_text)
         ).decode("utf-8", "ignore")
     except Exception:
-        return []
+        page = ""
     page = unescape(page).replace("\\/", "/")
-    title = _facebook_title(raw_url)
+    title = _facebook_title(embed_target)
     thumbnail = None
-    thumb_match = re.search(
-        r'"(?:thumbnail_url|preview_image)":"(https://scontent[^"]+)"', page
-    )
-    if thumb_match:
-        thumbnail = thumb_match.group(1).replace("\\/", "/")
-    headers = dict(_IMAGE_HEADERS)
+    for pattern in (
+        r'"(?:thumbnail_url|preview_image)":"(https://scontent[^"]+)"',
+        r'"preferred_thumbnail":\{"image":\{"uri":"(https:[^"]+)"',
+        r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)',
+    ):
+        thumb_match = re.search(pattern, page)
+        if thumb_match:
+            thumbnail = _decode_facebook_url(thumb_match.group(1))
+            break
+    headers = _facebook_headers(_IMAGE_HEADERS, cookie_text)
     headers["Referer"] = "https://www.facebook.com/"
     results = []
-    for label, key in (("HD", "hd_src"), ("SD", "sd_src")):
-        match = re.search(rf'"{key}":"(https:[^"]+)"', page)
-        if not match:
+    seen = set()
+    for label, key, media_url in _facebook_video_sources(page):
+        if media_url in seen:
             continue
-        media_url = unescape(match.group(1)).replace("\\/", "/")
-        if not media_url.startswith(("http://", "https://")):
-            continue
-        if any(item["url"] == media_url for item in results):
-            continue
+        seen.add(media_url)
         results.append(
             {
                 "url": media_url,
@@ -1305,13 +1369,13 @@ def _facebook_video_items(raw_url, cookie_text=""):
                 "quality_label": label,
                 "mime_type": "video/mp4",
                 "thumbnail": thumbnail,
-                "source_page": raw_url,
+                "source_page": embed_target,
                 "size": None,
                 "width": None,
                 "height": None,
                 "duration": None,
                 "uploader": None,
-                "format_id": f"facebook-{key}",
+                "format_id": f"facebook-{label.lower()}-{len(results) + 1}",
                 "found_in": "facebook embed",
                 "request_headers": headers,
                 "requires_extractor": False,
@@ -1405,6 +1469,25 @@ def _facebook_album_photos(token, cookie_text=""):
     return photos
 
 
+def _facebook_primary_image(page):
+    for tag in re.findall(r"<meta\b[^>]*>", page, re.I):
+        if not re.search(
+            r'(?:property|name)=["\']og:image(?::url)?["\']', tag, re.I
+        ):
+            continue
+        content = re.search(r'content=["\']([^"\']+)', tag, re.I)
+        if not content:
+            continue
+        url = _decode_facebook_url(content.group(1))
+        if not url.startswith(("http://", "https://")):
+            continue
+        lowered = url.lower()
+        if "static.xx.fbcdn.net" in lowered or "rsrc.php" in lowered:
+            continue
+        return url
+    return None
+
+
 def _facebook_crawler_image_items(raw_url, cookie_text=""):
     final_url = _facebook_final_url(raw_url, cookie_text)
     page = None
@@ -1436,8 +1519,9 @@ def _facebook_crawler_image_items(raw_url, cookie_text=""):
         seen_urls.add(image_url)
         media.append((str(media_id or ""), image_url))
 
-    # A multi-photo post can carry several attachment blocks (one per photo,
-    # album or comment). Read every block instead of only the first one.
+    # Only the shared post's own attachment block is authoritative. Pages
+    # (especially logged-in groups) also embed attachments for comments and
+    # related posts, which must not leak into the results.
     blocks = 0
     for key in ('"all_subattachments":', '"subattachments":'):
         for marker in re.finditer(re.escape(key), page):
@@ -1454,18 +1538,46 @@ def _facebook_crawler_image_items(raw_url, cookie_text=""):
                 attachment = json.loads(raw_object)
             except Exception:
                 continue
+            block_photos = []
+
+            def add_block(image_url, media_id="", _photos=block_photos):
+                if not isinstance(image_url, str) or not image_url.startswith(
+                    ("http://", "https://")
+                ):
+                    return
+                _photos.append((str(media_id or ""), image_url))
+
+            _collect_attachment_photos(attachment, add_block)
+            if not block_photos:
+                continue
             count = attachment.get("count") if isinstance(attachment, dict) else None
-            if isinstance(count, int) and count > declared:
-                declared = count
-            _collect_attachment_photos(attachment, add_photo)
+            if not media:
+                declared = (
+                    count
+                    if isinstance(count, int) and count > 0
+                    else len(block_photos)
+                )
+                for media_id, image_url in block_photos:
+                    add_photo(image_url, media_id)
+            else:
+                for media_id, image_url in block_photos:
+                    if declared and len(media) >= declared:
+                        break
+                    add_photo(image_url, media_id)
+            if declared and len(media) >= declared:
+                break
+        if declared and len(media) >= declared:
+            break
 
     # Facebook truncates the attachment nodes to the first five photos but
     # keeps the album token; the media-set page lists the whole album.
     token_match = re.search(r'"mediaset_token":"([^"]+)"', page)
-    if token_match:
+    if token_match and (declared == 0 or len(media) < declared):
         for media_id, image_url in _facebook_album_photos(
             token_match.group(1), cookie_text
         ):
+            if declared and len(media) >= declared:
+                break
             add_photo(image_url, media_id)
     if declared > 0 and len(media) > declared:
         media = media[:declared]
@@ -1479,6 +1591,11 @@ def _facebook_crawler_image_items(raw_url, cookie_text=""):
             media_id_match = re.search(r"media_id=(\d+)", image_url)
             media_id = media_id_match.group(1) if media_id_match else ""
             add_photo(image_url, media_id)
+    if not media:
+        # Single-photo posts expose the post image only through og:image.
+        primary = _facebook_primary_image(page)
+        if primary:
+            add_photo(primary)
     if not media:
         return []
     title_match = re.search(
@@ -1625,7 +1742,7 @@ def _facebook_page_video_items(raw_url, cookie_text=""):
         page = unescape(raw.decode("utf-8", "ignore")).replace("\\/", "/")
     except Exception:
         return []
-    candidates = []
+    sources = []
     for tag in re.findall(r"<meta\b[^>]*>", page, re.I):
         if not re.search(
             r'(?:property|name)=["\'](?:og:video(?::url|:secure_url)?|'
@@ -1637,11 +1754,15 @@ def _facebook_page_video_items(raw_url, cookie_text=""):
         content = re.search(r'content=["\']([^"\']+)', tag, re.I)
         if not content:
             continue
-        candidate = unescape(content.group(1))
+        candidate = _decode_facebook_url(content.group(1))
         if candidate.startswith(("http://", "https://")):
-            if candidate not in candidates:
-                candidates.append(candidate)
-    if not candidates:
+            if all(candidate != url for _, url in sources):
+                label = "HD" if not sources else f"Quality {len(sources) + 1}"
+                sources.append((label, candidate))
+    for label, _key, media_url in _facebook_video_sources(page):
+        if all(media_url != url for _, url in sources):
+            sources.append((label, media_url))
+    if not sources:
         return []
     title_match = re.search(
         r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)',
@@ -1657,10 +1778,9 @@ def _facebook_page_video_items(raw_url, cookie_text=""):
     item_headers = _facebook_headers(_FACEBOOK_HEADERS, cookie_text)
     item_headers["Referer"] = "https://www.facebook.com/"
     results = []
-    for index, url in enumerate(candidates[:6], start=1):
+    for index, (label, url) in enumerate(sources[:6], start=1):
         if not url.startswith(("http://", "https://")):
             continue
-        label = "HD" if index == 1 else f"Quality {index}"
         results.append(
             {
                 "url": url,
@@ -1823,6 +1943,30 @@ def extract(raw_url, cookie_text=""):
         )
         return json.dumps({"media": reddit_items, "source": "reddit-dash"})
 
+    # Facebook photo posts never expose a video, so resolve them here and skip
+    # the (slow, always-failing) yt-dlp pass entirely.
+    facebook_resolved = None
+    facebook_is_video = False
+    facebook_extras = None
+    if _is_facebook_host(host):
+        facebook_resolved = _facebook_final_url(raw_url, cookie_text)
+        facebook_is_video = _is_facebook_video_url(
+            raw_url
+        ) or _is_facebook_video_url(facebook_resolved)
+        if not facebook_is_video:
+            facebook_extras = _facebook_items(raw_url, cookie_text)
+            if facebook_extras and all(
+                item.get("type") == "image" for item in facebook_extras
+            ):
+                print(
+                    f"linky-ytdlp: {parsed.hostname} -> "
+                    f"{len(facebook_extras)} playable format(s)",
+                    flush=True,
+                )
+                return json.dumps(
+                    {"media": facebook_extras[:300], "source": "facebook"}
+                )
+
     cookie_path = None if is_youtube else _write_cookie_file(cookie_text)
     try:
         info = _extract_info(raw_url, cookie_path)
@@ -1850,11 +1994,20 @@ def extract(raw_url, cookie_text=""):
                     existing_urls.add(str(item.get("url")))
             items = items[:300]
         elif _is_facebook_host(host):
-            if items and not _is_facebook_video_url(raw_url):
+            resolved_facebook = facebook_resolved or _facebook_final_url(
+                raw_url, cookie_text
+            )
+            is_facebook_video = facebook_is_video
+            if facebook_extras is not None:
+                extras = facebook_extras
+            elif items and not is_facebook_video:
                 extras = _facebook_image_items(raw_url, cookie_text)
             else:
                 extras = _facebook_items(raw_url, cookie_text)
-            resolved_facebook = _facebook_final_url(raw_url, cookie_text)
+            if any(entry.get("type") == "image" for entry in extras):
+                # A post's own photos are authoritative. Drop any unrelated
+                # images yt-dlp may have harvested from the surrounding page.
+                items = [item for item in items if item.get("type") != "image"]
             if (
                 "/groups/" in urlparse(resolved_facebook).path
                 and any(entry.get("type") == "image" for entry in extras)

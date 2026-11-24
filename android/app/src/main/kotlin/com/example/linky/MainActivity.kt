@@ -5,6 +5,7 @@ import android.os.Build
 class MainActivity : LinkyFlutterActivity() {
     override fun onResume() {
         super.onResume()
+        restoreProgressChannel()
         announceMode()
         announceHidden(false)
     }

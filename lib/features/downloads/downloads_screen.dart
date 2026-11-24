@@ -1,14 +1,13 @@
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../services/download_service.dart';
+import '../../services/shell_navigation.dart';
 import '../../services/storage_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/app_ui.dart';
-import 'video_playback_screen.dart';
 
 class DownloadsScreen extends StatefulWidget {
   const DownloadsScreen({super.key});
@@ -18,7 +17,6 @@ class DownloadsScreen extends StatefulWidget {
 }
 
 class _DownloadsScreenState extends State<DownloadsScreen> {
-  int _segment = 0;
   final Map<String, DateTime> _speedSampledAt = {};
   final Map<String, double> _speedProgress = {};
   final Map<String, double> _speeds = {};
@@ -160,21 +158,6 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
     }
   }
 
-  void _playCompleted(DownloadRecord record) {
-    final path = record.filePath;
-    if (path == null) return;
-    final file = File(path);
-    if (!file.existsSync()) {
-      _toast('The saved file could not be found. It may have been moved.');
-      return;
-    }
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => VideoPlaybackScreen(file: file),
-      ),
-    );
-  }
-
   Future<void> _retry(DownloadRecord record) async {
     try {
       await DownloadService.instance.retry(record);
@@ -246,7 +229,9 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                               AppText.display(30, color: palette.foreground)),
                       const SizedBox(height: 2),
                       Text(
-                          '${active.length} active · ${completed.length} completed',
+                          failures.isEmpty
+                              ? '${active.length} active'
+                              : '${active.length} active · ${failures.length} need attention',
                           style:
                               AppText.body(12, color: palette.mutedForeground)),
                     ],
@@ -313,15 +298,6 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
               ],
             ),
             const SizedBox(height: 18),
-            PillSegment<int>(
-              value: _segment,
-              onChanged: (value) => setState(() => _segment = value),
-              options: [
-                PillOption(0, 'Active', badge: '${active.length}'),
-                PillOption(1, 'Completed', badge: '${completed.length}'),
-              ],
-            ),
-            const SizedBox(height: 18),
             Row(
               children: [
                 Expanded(
@@ -353,28 +329,32 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                 ),
               ],
             ),
+            const SizedBox(height: 14),
+            AppCard(
+              padding: const EdgeInsets.fromLTRB(14, 8, 6, 8),
+              child: Row(
+                children: [
+                  Icon(Icons.folder_rounded,
+                      size: 18, color: AppColors.primary),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Downloaded files are saved in your Library.',
+                      style:
+                          AppText.body(12, color: palette.mutedForeground),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () => ShellNavigation.instance.openTab(2),
+                    child: const Text('Open'),
+                  ),
+                ],
+              ),
+            ),
             const SizedBox(height: 22),
-            AnimatedSwitcher(
-              duration: const Duration(milliseconds: 220),
-              switchInCurve: Curves.easeOutCubic,
-              switchOutCurve: Curves.easeInCubic,
-              transitionBuilder: (child, animation) => FadeTransition(
-                opacity: animation,
-                child: SlideTransition(
-                  position: Tween<Offset>(
-                    begin: const Offset(0, 0.02),
-                    end: Offset.zero,
-                  ).animate(animation),
-                  child: child,
-                ),
-              ),
-              child: Column(
-                key: ValueKey(_segment),
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: _segment == 0
-                    ? _activeSection(active, failures)
-                    : _completedSection(completed),
-              ),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: _activeSection(active, failures),
             ),
           ],
         ),
@@ -393,7 +373,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
           icon: Icons.download_done_rounded,
           title: 'No active downloads',
           message:
-              'Find media on the Home tab, then queue what you want to keep.',
+              'Queue media from Home. Finished files are saved in your Library.',
         ),
       ];
     }
@@ -419,75 +399,6 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
         for (final record in failures) _transferCard(record),
       ],
     ];
-  }
-
-  List<Widget> _completedSection(List<DownloadRecord> completed) {
-    if (completed.isEmpty) {
-      return [
-        const SizedBox(height: 24),
-        const EmptyState(
-          icon: Icons.folder_open_rounded,
-          title: 'No completed downloads yet',
-          message: 'Finished transfers will be listed here.',
-        ),
-      ];
-    }
-    return [
-      SectionLabel('Completed · ${completed.length}'),
-      for (final record in completed) _completedCard(record),
-    ];
-  }
-
-  Widget _completedCard(DownloadRecord record) {
-    final palette = context.palette;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: AppCard(
-        padding: const EdgeInsets.all(14),
-        onTap: record.type == 'video' || record.type == 'audio'
-            ? () => _playCompleted(record)
-            : null,
-        child: Row(
-          children: [
-            Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: AppColors.teal.withValues(alpha: 0.14),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(Icons.check_rounded,
-                  color: AppColors.teal, size: 20),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(record.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: AppText.body(14, weight: FontWeight.w700)),
-                  const SizedBox(height: 3),
-                  Text(
-                    record.expectedBytes > 0
-                        ? 'Completed · ${_formatBytes(record.expectedBytes)}'
-                        : 'Completed',
-                    style: AppText.body(12, color: palette.mutedForeground),
-                  ),
-                ],
-              ),
-            ),
-            IconButton(
-              tooltip: 'Dismiss',
-              onPressed: () => DownloadService.instance.dismiss(record),
-              icon: Icon(Icons.close_rounded,
-                  size: 18, color: palette.mutedForeground),
-            ),
-          ],
-        ),
-      ),
-    );
   }
 
   Widget _transferCard(DownloadRecord record) {

@@ -15,6 +15,7 @@ import '../../widgets/app_ui.dart';
 import '../../widgets/media_thumbnail.dart';
 import '../downloads/video_playback_screen.dart';
 import 'folder_picker.dart';
+import 'library_media_viewer.dart';
 
 class LibraryScreen extends StatefulWidget {
   const LibraryScreen({super.key});
@@ -602,33 +603,14 @@ class _LibraryScreenState extends State<LibraryScreen> {
     );
   }
 
-  void _previewImage(File file) {
-    showDialog<void>(
-      context: context,
-      builder: (context) => Dialog.fullscreen(
-        backgroundColor: Colors.black,
-        child: Scaffold(
-          backgroundColor: Colors.black,
-          appBar: AppBar(
-            backgroundColor: Colors.transparent,
-            foregroundColor: Colors.white,
-            title: Text(file.uri.pathSegments.last),
-            actions: [
-              IconButton(
-                tooltip: 'Delete file',
-                onPressed: () async {
-                  Navigator.pop(context);
-                  await _delete(file);
-                },
-                icon: const Icon(Icons.delete_outline),
-              ),
-            ],
-          ),
-          body: Center(
-            child: InteractiveViewer(
-              child: Image.file(file, fit: BoxFit.contain),
-            ),
-          ),
+  void _openViewer(List<File> files, int index) {
+    if (files.isEmpty) return;
+    final safeIndex = index.clamp(0, files.length - 1);
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => LibraryMediaViewer(
+          files: files,
+          initialIndex: safeIndex,
         ),
       ),
     );
@@ -935,7 +917,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
                               }
                               final file = files[index - 1];
                               return _fileCard(
-                                  file, data.sizeByPath[file.path]);
+                                file,
+                                data.sizeByPath[file.path],
+                                files,
+                                index - 1,
+                              );
                             },
                           ),
                         ),
@@ -1025,7 +1011,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
         ),
       );
 
-  Widget _fileCard(File file, int? size) {
+  Widget _fileCard(
+    File file,
+    int? size,
+    List<File> files,
+    int position,
+  ) {
     final palette = context.palette;
     final name = file.uri.pathSegments.last;
     final isImage = _isImage(name);
@@ -1039,11 +1030,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
         color: selected ? palette.accent : null,
         onTap: _selecting
             ? () => _toggleSelect(file)
-            : isImage
-                ? () => _previewImage(file)
-                : isVideo || isAudio
-                    ? () => _play(file)
-                    : null,
+            : () => _openViewer(files, position),
         child: Row(
           children: [
             GestureDetector(

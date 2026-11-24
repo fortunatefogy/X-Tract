@@ -25,7 +25,6 @@ import com.chaquo.python.Python
 import com.chaquo.python.android.AndroidPlatform
 import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
-import io.flutter.embedding.engine.FlutterEngineCache
 import io.flutter.embedding.engine.dart.DartExecutor
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
@@ -54,36 +53,49 @@ object ExtractorProgress {
     }
 }
 
-object LinkyEngine {
-    const val ID = "linky"
-}
-
 abstract class LinkyFlutterActivity : FlutterFragmentActivity() {
     private var pendingSharedText: String? = null
     private var pendingBrowserUrl: String? = null
     private var shareChannel: MethodChannel? = null
+    private var extractorChannel: MethodChannel? = null
     private val extractorExecutor = Executors.newSingleThreadExecutor()
     private val thumbnailExecutor = Executors.newFixedThreadPool(2)
 
     protected open val shareModeName: String get() = "main"
     protected open val supportsShare: Boolean get() = false
 
-    override fun shouldDestroyEngineWithHost(): Boolean = false
-
+    // Each activity owns its engine. Sharing one cached engine across the main
+    // activity and the transparent share activity let a detached FlutterView
+    // still deliver viewport metrics, which crashed with
+    // "FlutterJNI is not attached to native" during layout.
     override fun provideFlutterEngine(context: Context): FlutterEngine {
-        val cache = FlutterEngineCache.getInstance()
-        cache.get(LinkyEngine.ID)?.let { return it }
         val engine = FlutterEngine(context)
         engine.dartExecutor.executeDartEntrypoint(
             DartExecutor.DartEntrypoint.createDefault(),
             listOf(shareModeName, sharedText(intent) ?: ""),
         )
-        cache.put(LinkyEngine.ID, engine)
         return engine
+    }
+
+    override fun onDestroy() {
+        if (ExtractorProgress.channel === extractorChannel) {
+            ExtractorProgress.channel = null
+        }
+        shareChannel = null
+        extractorChannel = null
+        extractorExecutor.shutdownNow()
+        thumbnailExecutor.shutdownNow()
+        super.onDestroy()
     }
 
     protected open fun announceMode() {
         shareChannel?.invokeMethod("shareModeChanged", shareModeName == "share")
+    }
+
+    /// Re-attach the shared yt-dlp progress bridge to this activity's engine,
+    /// e.g. after a transparent share activity took it over and closed.
+    protected fun restoreProgressChannel() {
+        extractorChannel?.let { ExtractorProgress.channel = it }
     }
 
     protected open fun onShareReady() {}
@@ -486,10 +498,11 @@ abstract class LinkyFlutterActivity : FlutterFragmentActivity() {
                     result.error("notification_failed", error.message, null)
                 }
             }
-        val extractorChannel =
+        val channel =
             MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "linky/extractor")
-        ExtractorProgress.channel = extractorChannel
-        extractorChannel
+        extractorChannel = channel
+        ExtractorProgress.channel = channel
+        channel
             .setMethodCallHandler { call, result ->
                 if (call.method != "extractWithYtDlp" &&
                     call.method != "downloadWithYtDlp") {
