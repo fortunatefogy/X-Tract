@@ -20,7 +20,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.FileProvider
 import com.chaquo.python.Python
 import com.chaquo.python.android.AndroidPlatform
-import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.engine.FlutterEngineCache
 import io.flutter.embedding.engine.dart.DartExecutor
@@ -53,7 +53,7 @@ object LinkyEngine {
     const val ID = "linky"
 }
 
-abstract class LinkyFlutterActivity : FlutterActivity() {
+abstract class LinkyFlutterActivity : FlutterFragmentActivity() {
     private var pendingSharedText: String? = null
     private var pendingBrowserUrl: String? = null
     private var shareChannel: MethodChannel? = null

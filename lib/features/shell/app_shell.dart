@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../services/download_service.dart';
 import '../../services/shell_navigation.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/motion.dart';
@@ -57,9 +58,13 @@ class _AppShellState extends State<AppShell> {
           _loaded.contains(0)
               ? HomeScreen(onOpenTab: _openTab)
               : const SizedBox.shrink(),
-          _loaded.contains(1) ? const DownloadsScreen() : const SizedBox.shrink(),
+          _loaded.contains(1)
+              ? const DownloadsScreen()
+              : const SizedBox.shrink(),
           _loaded.contains(2) ? const LibraryScreen() : const SizedBox.shrink(),
-          _loaded.contains(3) ? const SettingsScreen() : const SizedBox.shrink(),
+          _loaded.contains(3)
+              ? const SettingsScreen()
+              : const SizedBox.shrink(),
         ],
       ),
       bottomNavigationBar: LinkyBottomBar(
@@ -70,7 +75,7 @@ class _AppShellState extends State<AppShell> {
   }
 }
 
-class LinkyBottomBar extends StatelessWidget {
+class LinkyBottomBar extends StatefulWidget {
   const LinkyBottomBar({
     super.key,
     required this.index,
@@ -79,6 +84,27 @@ class LinkyBottomBar extends StatelessWidget {
 
   final int index;
   final ValueChanged<int> onTap;
+
+  @override
+  State<LinkyBottomBar> createState() => _LinkyBottomBarState();
+}
+
+class _LinkyBottomBarState extends State<LinkyBottomBar> {
+  @override
+  void initState() {
+    super.initState();
+    DownloadService.instance.addListener(_onDownloadsChanged);
+  }
+
+  @override
+  void dispose() {
+    DownloadService.instance.removeListener(_onDownloadsChanged);
+    super.dispose();
+  }
+
+  void _onDownloadsChanged() {
+    if (mounted) setState(() {});
+  }
 
   static const _items = <(IconData, IconData, String)>[
     (Icons.home_outlined, Icons.home_rounded, 'Home'),
@@ -90,6 +116,7 @@ class LinkyBottomBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final palette = context.palette;
+    final activeDownloads = DownloadService.instance.active.length;
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
       child: SafeArea(
@@ -111,8 +138,9 @@ class LinkyBottomBar extends StatelessWidget {
                     icon: _items[i].$1,
                     activeIcon: _items[i].$2,
                     label: _items[i].$3,
-                    selected: index == i,
-                    onTap: () => onTap(i),
+                    selected: widget.index == i,
+                    badge: i == 1 ? activeDownloads : 0,
+                    onTap: () => widget.onTap(i),
                   ),
                 ),
             ],
@@ -129,6 +157,7 @@ class _NavItem extends StatelessWidget {
     required this.activeIcon,
     required this.label,
     required this.selected,
+    required this.badge,
     required this.onTap,
   });
 
@@ -136,44 +165,79 @@ class _NavItem extends StatelessWidget {
   final IconData activeIcon;
   final String label;
   final bool selected;
+  final int badge;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final palette = context.palette;
     final color = selected ? AppColors.primary : palette.mutedForeground;
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(AppRadius.inner),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 180),
-              curve: Curves.easeOut,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-              decoration: BoxDecoration(
-                color: selected ? palette.accent : Colors.transparent,
-                borderRadius: BorderRadius.circular(11),
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: badge > 0
+          ? '$label, $badge active download${badge == 1 ? '' : 's'}'
+          : label,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(AppRadius.inner),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    curve: Curves.easeOut,
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: selected ? palette.accent : Colors.transparent,
+                      borderRadius: BorderRadius.circular(11),
+                    ),
+                    child: Icon(
+                      selected ? activeIcon : icon,
+                      size: 19,
+                      color: color,
+                    ),
+                  ),
+                  if (badge > 0)
+                    Positioned(
+                      top: -4,
+                      right: 2,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 5),
+                        constraints: const BoxConstraints(minWidth: 16),
+                        height: 16,
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: AppColors.primary,
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(color: palette.card, width: 1.5),
+                        ),
+                        child: Text(
+                          '$badge',
+                          style: AppText.body(9,
+                              weight: FontWeight.w800, color: Colors.white),
+                        ),
+                      ),
+                    ),
+                ],
               ),
-              child: Icon(
-                selected ? activeIcon : icon,
-                size: 19,
-                color: color,
+              const SizedBox(height: 3),
+              Text(
+                label,
+                style: AppText.body(
+                  10,
+                  weight: selected ? FontWeight.w700 : FontWeight.w500,
+                  color: color,
+                ),
               ),
-            ),
-            const SizedBox(height: 3),
-            Text(
-              label,
-              style: AppText.body(
-                10,
-                weight: selected ? FontWeight.w700 : FontWeight.w500,
-                color: color,
-              ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

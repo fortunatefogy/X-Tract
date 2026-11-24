@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../models/media_item.dart';
 import '../../services/download_service.dart';
@@ -81,10 +82,12 @@ class _SharePopupScreenState extends State<SharePopupScreen>
     return urls.take(20).toList();
   }
 
-  Future<void> _scan() async {
-    final urls = _extractUrls(widget.initialText ?? '');
+  Future<void> _scan() => _scanText(widget.initialText ?? '');
+
+  Future<void> _scanText(String text) async {
+    final urls = _extractUrls(text);
     if (urls.isEmpty) {
-      setState(() => _error = 'No link was shared with Linky.');
+      setState(() => _error = 'No link was found. Paste a link below to scan.');
       return;
     }
     setState(() {
@@ -180,6 +183,7 @@ class _SharePopupScreenState extends State<SharePopupScreen>
   }
 
   void _toggle(MediaItem item) {
+    HapticFeedback.selectionClick();
     final key = _key(item);
     setState(() {
       if (_selected.contains(key)) {
@@ -237,7 +241,7 @@ class _SharePopupScreenState extends State<SharePopupScreen>
                 Container(
                   width: 36,
                   height: 36,
-                  decoration: const BoxDecoration(
+                  decoration: BoxDecoration(
                     color: AppColors.primary,
                     shape: BoxShape.circle,
                   ),
@@ -250,16 +254,14 @@ class _SharePopupScreenState extends State<SharePopupScreen>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text('Linky share',
-                          style:
-                              AppText.heading(17, weight: FontWeight.w800)),
+                          style: AppText.heading(17, weight: FontWeight.w800)),
                       Text(
                         _loading
                             ? 'Scanning link for media…'
                             : '${_media.length} media item${_media.length == 1 ? '' : 's'} found',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: AppText.body(12,
-                            color: palette.mutedForeground),
+                        style: AppText.body(12, color: palette.mutedForeground),
                       ),
                     ],
                   ),
@@ -308,6 +310,11 @@ class _SharePopupScreenState extends State<SharePopupScreen>
                         ),
                     ],
                   ),
+                  const SizedBox(height: 10),
+                  _ManualLinkInput(
+                    initialText: widget.initialText ?? '',
+                    onSubmit: _scanText,
+                  ),
                 ],
               ),
             )
@@ -329,20 +336,17 @@ class _SharePopupScreenState extends State<SharePopupScreen>
                       Expanded(
                         child: Text(
                           _error!,
-                          style: AppText.body(11,
-                              color: palette.mutedForeground),
+                          style:
+                              AppText.body(11, color: palette.mutedForeground),
                         ),
                       ),
-                      if (_primaryUrl != null &&
-                          widget.onOpenBrowser != null)
+                      if (_primaryUrl != null && widget.onOpenBrowser != null)
                         TextButton(
                           onPressed: _openBrowser,
                           style: TextButton.styleFrom(
-                            padding:
-                                const EdgeInsets.symmetric(horizontal: 8),
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
                             minimumSize: const Size(0, 32),
-                            tapTargetSize:
-                                MaterialTapTargetSize.shrinkWrap,
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                           ),
                           child: const Text('Browser'),
                         ),
@@ -375,8 +379,7 @@ class _SharePopupScreenState extends State<SharePopupScreen>
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
                 itemCount: _media.length,
                 separatorBuilder: (_, __) => const SizedBox(height: 8),
-                itemBuilder: (context, index) =>
-                    _itemTile(_media[index]),
+                itemBuilder: (context, index) => _itemTile(_media[index]),
               ),
             ),
           ],
@@ -387,8 +390,7 @@ class _SharePopupScreenState extends State<SharePopupScreen>
               child: SizedBox(
                 width: double.infinity,
                 child: FilledButton.icon(
-                  onPressed:
-                      chosenCount == 0 || _queueing ? null : _download,
+                  onPressed: chosenCount == 0 || _queueing ? null : _download,
                   icon: _queueing
                       ? const SizedBox(
                           width: 16,
@@ -487,8 +489,7 @@ class _SharePopupScreenState extends State<SharePopupScreen>
                       _meta(item),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: AppText.body(11,
-                          color: palette.mutedForeground),
+                      style: AppText.body(11, color: palette.mutedForeground),
                     ),
                   ],
                 ),
@@ -523,7 +524,8 @@ class _SharePopupScreenState extends State<SharePopupScreen>
   String _meta(MediaItem item) {
     final parts = <String>[item.type.toUpperCase()];
     if (item.qualityLabel != null) parts.add(item.qualityLabel!);
-    if (item.size != null && item.size! > 0) parts.add(_formatBytes(item.size!));
+    if (item.size != null && item.size! > 0)
+      parts.add(_formatBytes(item.size!));
     if (item.durationSeconds != null) {
       parts.add(_formatDuration(item.durationSeconds!));
     }
@@ -547,5 +549,84 @@ class _SharePopupScreenState extends State<SharePopupScreen>
     return duration.inHours > 0
         ? '${duration.inHours}:$minutes:$remaining'
         : '$minutes:$remaining';
+  }
+}
+
+class _ManualLinkInput extends StatefulWidget {
+  const _ManualLinkInput({
+    required this.initialText,
+    required this.onSubmit,
+  });
+
+  final String initialText;
+  final ValueChanged<String> onSubmit;
+
+  @override
+  State<_ManualLinkInput> createState() => _ManualLinkInputState();
+}
+
+class _ManualLinkInputState extends State<_ManualLinkInput> {
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(
+      text: _firstUrl(widget.initialText),
+    );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  static String _firstUrl(String text) {
+    final match =
+        RegExp(r"""https?://[^\s<>"']+""", caseSensitive: false).firstMatch(
+      text,
+    );
+    if (match == null) return '';
+    return match.group(0)!.replaceAll(RegExp(r'[),.\]}!?;:]+$'), '');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.palette;
+    return Row(
+      children: [
+        Expanded(
+          child: TextField(
+            controller: _controller,
+            keyboardType: TextInputType.url,
+            textInputAction: TextInputAction.go,
+            onSubmitted: widget.onSubmit,
+            decoration: InputDecoration(
+              hintText: 'Paste a link to scan',
+              prefixIcon: Icon(Icons.link_rounded,
+                  size: 18, color: palette.mutedForeground),
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        IconButton(
+          tooltip: 'Paste from clipboard',
+          onPressed: () async {
+            final data = await Clipboard.getData(Clipboard.kTextPlain);
+            final text = data?.text?.trim();
+            if (text != null && text.isNotEmpty) {
+              _controller.text = text;
+            }
+          },
+          icon:
+              Icon(Icons.content_paste_rounded, color: palette.mutedForeground),
+        ),
+        FilledButton(
+          onPressed: () => widget.onSubmit(_controller.text),
+          child: const Text('Scan'),
+        ),
+      ],
+    );
   }
 }

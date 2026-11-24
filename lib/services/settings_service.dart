@@ -57,6 +57,7 @@ class SettingsService extends ChangeNotifier {
   static const simultaneousDownloadPresets = <int>[1, 2, 3, 4, 6, 8];
 
   ThemeMode _themeMode = ThemeMode.system;
+  String _accentColor = 'violet';
   bool _onlyPlayingVideo = true;
   bool _filterJunkMedia = true;
   bool _detectImages = true;
@@ -76,6 +77,7 @@ class SettingsService extends ChangeNotifier {
   String _downloadLocation = 'app';
   bool _copyToPublicDownloads = false;
   bool _desktopMode = false;
+  bool _appLockEnabled = false;
   bool _redirectPromptEnabled = true;
   bool _blockPopups = true;
   String _searchEngine = 'google';
@@ -94,6 +96,7 @@ class SettingsService extends ChangeNotifier {
   bool _initialized = false;
 
   ThemeMode get themeMode => _themeMode;
+  String get accentColor => _accentColor;
   bool get onlyPlayingVideo => _onlyPlayingVideo;
   bool get filterJunkMedia => _filterJunkMedia;
   bool get detectImages => _detectImages;
@@ -114,6 +117,7 @@ class SettingsService extends ChangeNotifier {
   String get downloadLocation => _downloadLocation;
   bool get copyToPublicDownloads => _copyToPublicDownloads;
   bool get desktopMode => _desktopMode;
+  bool get appLockEnabled => _appLockEnabled;
   bool get redirectPromptEnabled => _redirectPromptEnabled;
   bool get blockPopups => _blockPopups;
   String get searchEngine => _searchEngine;
@@ -248,6 +252,7 @@ class SettingsService extends ChangeNotifier {
             'dark' => ThemeMode.dark,
             _ => ThemeMode.system,
           };
+          _accentColor = decoded['accent_color'] as String? ?? 'violet';
           _onlyPlayingVideo = decoded['only_playing_video'] as bool? ?? true;
           _filterJunkMedia = decoded['filter_junk_media'] as bool? ?? true;
           _detectImages = decoded['detect_images'] as bool? ?? true;
@@ -276,6 +281,7 @@ class SettingsService extends ChangeNotifier {
           _copyToPublicDownloads =
               decoded['copy_to_public_downloads'] as bool? ?? false;
           _desktopMode = decoded['desktop_mode'] as bool? ?? false;
+        _appLockEnabled = decoded['app_lock_enabled'] as bool? ?? false;
           _redirectPromptEnabled =
               decoded['redirect_prompt_enabled'] as bool? ?? true;
           _blockPopups = decoded['block_popups'] as bool? ?? true;
@@ -363,6 +369,13 @@ class SettingsService extends ChangeNotifier {
   Future<void> setThemeMode(ThemeMode mode) async {
     if (_themeMode == mode) return;
     _themeMode = mode;
+    notifyListeners();
+    await _save();
+  }
+
+  Future<void> setAccentColor(String id) async {
+    if (_accentColor == id) return;
+    _accentColor = id;
     notifyListeners();
     await _save();
   }
@@ -494,6 +507,13 @@ class SettingsService extends ChangeNotifier {
   Future<void> setDesktopMode(bool value) async {
     if (_desktopMode == value) return;
     _desktopMode = value;
+    notifyListeners();
+    await _save();
+  }
+
+  Future<void> setAppLockEnabled(bool value) async {
+    if (_appLockEnabled == value) return;
+    _appLockEnabled = value;
     notifyListeners();
     await _save();
   }
@@ -704,6 +724,7 @@ class SettingsService extends ChangeNotifier {
           ThemeMode.dark => 'dark',
           ThemeMode.system => 'system',
         },
+        'accent_color': _accentColor,
         'only_playing_video': _onlyPlayingVideo,
         'filter_junk_media': _filterJunkMedia,
         'detect_images': _detectImages,
@@ -723,6 +744,7 @@ class SettingsService extends ChangeNotifier {
         'download_location': _downloadLocation,
         'copy_to_public_downloads': _copyToPublicDownloads,
         'desktop_mode': _desktopMode,
+        'app_lock_enabled': _appLockEnabled,
         'redirect_prompt_enabled': _redirectPromptEnabled,
         'block_popups': _blockPopups,
         'search_engine': _searchEngine,

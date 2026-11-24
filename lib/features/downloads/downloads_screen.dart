@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -7,6 +8,7 @@ import '../../services/download_service.dart';
 import '../../services/storage_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/app_ui.dart';
+import 'video_playback_screen.dart';
 
 class DownloadsScreen extends StatefulWidget {
   const DownloadsScreen({super.key});
@@ -115,6 +117,64 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
     }
   }
 
+  Future<bool> _confirm(String title, String message) async {
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(title),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Confirm'),
+          ),
+        ],
+      ),
+    );
+    return result ?? false;
+  }
+
+  Future<void> _cancelWithConfirm(DownloadRecord record) async {
+    final confirmed = await _confirm(
+      'Cancel download?',
+      '"${record.title}" will stop and be removed from the queue. '
+          'Any partial file is discarded.',
+    );
+    if (confirmed && mounted) {
+      DownloadService.instance.cancel(record);
+    }
+  }
+
+  Future<void> _clearFinishedWithConfirm() async {
+    final confirmed = await _confirm(
+      'Clear finished downloads?',
+      'Completed and failed entries will be removed from this list. '
+          'Saved files are kept in your library.',
+    );
+    if (confirmed && mounted) {
+      DownloadService.instance.clearFinished();
+    }
+  }
+
+  void _playCompleted(DownloadRecord record) {
+    final path = record.filePath;
+    if (path == null) return;
+    final file = File(path);
+    if (!file.existsSync()) {
+      _toast('The saved file could not be found. It may have been moved.');
+      return;
+    }
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => VideoPlaybackScreen(file: file),
+      ),
+    );
+  }
+
   Future<void> _retry(DownloadRecord record) async {
     try {
       await DownloadService.instance.retry(record);
@@ -158,17 +218,15 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
     final speed = _speeds.values
         .where((value) => value.isFinite && value > 0)
         .fold<double>(0, (sum, value) => sum + value);
-    final remainingBytes = active.fold<int>(
-      0,
-      (sum, record) =>
-          sum +
-          (record.expectedBytes > 0
-              ? (record.expectedBytes * (1 - record.progress)).round()
-              : 0),
-    );
-    final remaining = speed > 0 && remainingBytes > 0
-        ? Duration(seconds: (remainingBytes / speed).round())
-        : null;
+    Duration? remaining;
+    for (final record in active) {
+      final rate = _speeds[record.taskId];
+      if (rate == null || !rate.isFinite || rate <= 0) continue;
+      if (record.expectedBytes <= 0) continue;
+      final bytesLeft = (record.expectedBytes * (1 - record.progress)).round();
+      final eta = Duration(seconds: (bytesLeft / rate).round());
+      if (remaining == null || eta > remaining) remaining = eta;
+    }
 
     return Scaffold(
       body: SafeArea(
@@ -202,7 +260,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                     if (value == 'pauseAll') downloads.pauseAll();
                     if (value == 'resumeAll') downloads.resumeAll();
                     if (value == 'retryAll') downloads.retryAll();
-                    if (value == 'clear') downloads.clearFinished();
+                    if (value == 'clear') _clearFinishedWithConfirm();
                     if (value == 'export') _exportQueue();
                     if (value == 'import') _importQueue();
                     if (value == 'openFolder') _openFolder();
@@ -386,6 +444,9 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
       padding: const EdgeInsets.only(bottom: 10),
       child: AppCard(
         padding: const EdgeInsets.all(14),
+        onTap: record.type == 'video' || record.type == 'audio'
+            ? () => _playCompleted(record)
+            : null,
         child: Row(
           children: [
             Container(
@@ -587,7 +648,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                   height: 44,
                   child: OutlinedButton(
                     onPressed: canCancel
-                        ? () => DownloadService.instance.cancel(record)
+                        ? () => _cancelWithConfirm(record)
                         : () => DownloadService.instance.dismiss(record),
                     style: OutlinedButton.styleFrom(
                       padding: EdgeInsets.zero,

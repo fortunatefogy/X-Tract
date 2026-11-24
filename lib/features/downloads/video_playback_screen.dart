@@ -148,7 +148,7 @@ class _VideoPlaybackScreenState extends State<VideoPlaybackScreen> {
                     ? '${option.toInt()}x'
                     : '${option}x'),
                 trailing: option == _speed
-                    ? const Icon(Icons.check_rounded, color: AppColors.primary)
+                    ? Icon(Icons.check_rounded, color: AppColors.primary)
                     : null,
                 onTap: () => Navigator.of(sheetContext).pop(option),
               ),
@@ -185,7 +185,7 @@ class _VideoPlaybackScreenState extends State<VideoPlaybackScreen> {
                 ),
               )
             else if (!value.isInitialized)
-              const Center(
+              Center(
                 child: CircularProgressIndicator(color: AppColors.primary),
               )
             else if (_isAudio)
@@ -198,7 +198,7 @@ class _VideoPlaybackScreenState extends State<VideoPlaybackScreen> {
                     shape: BoxShape.circle,
                     border: Border.all(color: AppColors.forestBorder),
                   ),
-                  child: const Icon(
+                  child: Icon(
                     Icons.music_note_rounded,
                     size: 96,
                     color: AppColors.primary,
@@ -322,7 +322,7 @@ class _VideoPlaybackScreenState extends State<VideoPlaybackScreen> {
                         child: Container(
                           width: 72,
                           height: 72,
-                          decoration: const BoxDecoration(
+                          decoration: BoxDecoration(
                             color: AppColors.primary,
                             shape: BoxShape.circle,
                           ),

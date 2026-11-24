@@ -92,7 +92,7 @@ class _BrowserHomePageState extends State<BrowserHomePage> {
                   leading: const Icon(Icons.search_rounded),
                   title: Text(entry.value),
                   trailing: _settings.searchEngine == entry.key
-                      ? const Icon(Icons.check_rounded,
+                      ? Icon(Icons.check_rounded,
                           color: AppColors.forestAccent)
                       : null,
                   onTap: () => Navigator.of(sheetContext).pop(entry.key),
@@ -149,7 +149,7 @@ class _BrowserHomePageState extends State<BrowserHomePage> {
                     width: 48,
                     height: 48,
                     decoration: BoxDecoration(
-                      gradient: const LinearGradient(
+                      gradient: LinearGradient(
                         colors: [AppColors.heroStart, AppColors.heroEnd],
                         begin: Alignment.topLeft,
                         end: Alignment.bottomRight,
@@ -275,7 +275,7 @@ class _BrowserHomePageState extends State<BrowserHomePage> {
         borderRadius: BorderRadius.circular(20),
         gradient: LinearGradient(
           colors: focused
-              ? const [AppColors.heroStart, AppColors.forestAccent]
+              ? [AppColors.heroStart, AppColors.forestAccent]
               : const [AppColors.forestBorder, AppColors.forestBorder],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
@@ -297,7 +297,7 @@ class _BrowserHomePageState extends State<BrowserHomePage> {
         child: Row(
           children: [
             const SizedBox(width: 14),
-            const Icon(
+            Icon(
               Icons.search_rounded,
               color: AppColors.forestAccent,
               size: 20,
@@ -342,7 +342,7 @@ class _BrowserHomePageState extends State<BrowserHomePage> {
                   child: InkWell(
                     onTap: _submit,
                     child: Ink(
-                      decoration: const BoxDecoration(
+                      decoration: BoxDecoration(
                         shape: BoxShape.circle,
                         gradient: LinearGradient(
                           colors: [AppColors.heroStart, AppColors.heroEnd],

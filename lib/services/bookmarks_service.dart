@@ -136,6 +136,15 @@ class BookmarksService extends ChangeNotifier {
     await _save();
   }
 
+  Future<void> restore(BookmarkEntry entry) async {
+    if (_entries.any((existing) => existing.id == entry.id)) return;
+    final index = _entries
+        .indexWhere((existing) => existing.createdAt.isAfter(entry.createdAt));
+    _entries.insert(index < 0 ? _entries.length : index, entry);
+    notifyListeners();
+    await _save();
+  }
+
   Future<void> setThumbnail(String url, String? thumbnail) async {
     if (thumbnail == null || thumbnail.isEmpty) return;
     final normalized = url.trim();

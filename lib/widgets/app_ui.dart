@@ -141,7 +141,7 @@ class RoundIconButton extends StatelessWidget {
                       horizontal: 5,
                       vertical: 1,
                     ),
-                    decoration: const BoxDecoration(
+                    decoration: BoxDecoration(
                       color: AppColors.primary,
                       shape: BoxShape.circle,
                     ),
@@ -253,7 +253,7 @@ class _PillButton extends StatelessWidget {
               Container(
                 padding:
                     const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                decoration: const BoxDecoration(
+                decoration: BoxDecoration(
                   color: AppColors.primary,
                   borderRadius: BorderRadius.all(Radius.circular(999)),
                 ),

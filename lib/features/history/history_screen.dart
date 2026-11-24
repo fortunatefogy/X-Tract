@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../services/history_service.dart';
 import '../../theme/app_theme.dart';
@@ -76,66 +77,67 @@ class _HistoryScreenState extends State<HistoryScreen> {
                     entry.url.toLowerCase().contains(query))
                 .toList(growable: false);
             final rows = <Widget>[
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    RoundIconButton(
-                      icon: Icons.arrow_back_rounded,
-                      tooltip: 'Back',
-                      size: 40,
-                      onPressed: () => Navigator.of(context).maybePop(),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('History',
-                              style: AppText.display(30,
-                                  color: palette.foreground)),
-                          const SizedBox(height: 2),
-                          Text(
-                            '${service.entries.length} visited page${service.entries.length == 1 ? '' : 's'}',
-                            style: AppText.body(13,
-                                color: palette.mutedForeground),
-                          ),
-                        ],
-                      ),
-                    ),
-                    RoundIconButton(
-                      icon: Icons.delete_sweep_outlined,
-                      tooltip: 'Clear history',
-                      color: palette.destructive,
-                      onPressed: service.entries.isEmpty ? null : _clear,
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 18),
-                TextField(
-                  controller: _searchController,
-                  textInputAction: TextInputAction.search,
-                  decoration: InputDecoration(
-                    hintText: 'Search history',
-                    prefixIcon: Icon(Icons.search_rounded,
-                        size: 20, color: palette.mutedForeground),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  RoundIconButton(
+                    icon: Icons.arrow_back_rounded,
+                    tooltip: 'Back',
+                    size: 40,
+                    onPressed: () => Navigator.of(context).maybePop(),
                   ),
-                ),
-                const SizedBox(height: 18),
-                if (entries.isEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 24),
-                    child: EmptyState(
-                      icon: query.isEmpty
-                          ? Icons.history_rounded
-                          : Icons.search_off_rounded,
-                      title: query.isEmpty ? 'No history yet' : 'No matches',
-                      message: query.isEmpty
-                          ? 'Pages you open in the Linky browser appear here.'
-                          : 'Try a different title or address.',
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('History',
+                            style:
+                                AppText.display(30, color: palette.foreground)),
+                        const SizedBox(height: 2),
+                        Text(
+                          '${entries.length} visited page${entries.length == 1 ? '' : 's'}'
+                          '${query.isNotEmpty && entries.length != service.entries.length ? ' of ${service.entries.length}' : ''}',
+                          style:
+                              AppText.body(13, color: palette.mutedForeground),
+                        ),
+                      ],
                     ),
-                  )
-                else
-                  ..._grouped(entries),
+                  ),
+                  RoundIconButton(
+                    icon: Icons.delete_sweep_outlined,
+                    tooltip: 'Clear history',
+                    color: palette.destructive,
+                    onPressed: service.entries.isEmpty ? null : _clear,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 18),
+              TextField(
+                controller: _searchController,
+                textInputAction: TextInputAction.search,
+                decoration: InputDecoration(
+                  hintText: 'Search history',
+                  prefixIcon: Icon(Icons.search_rounded,
+                      size: 20, color: palette.mutedForeground),
+                ),
+              ),
+              const SizedBox(height: 18),
+              if (entries.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 24),
+                  child: EmptyState(
+                    icon: query.isEmpty
+                        ? Icons.history_rounded
+                        : Icons.search_off_rounded,
+                    title: query.isEmpty ? 'No history yet' : 'No matches',
+                    message: query.isEmpty
+                        ? 'Pages you open in the Linky browser appear here.'
+                        : 'Try a different title or address.',
+                  ),
+                )
+              else
+                ..._grouped(entries),
             ];
             return ListView.builder(
               padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
@@ -204,18 +206,28 @@ class _HistoryScreenState extends State<HistoryScreen> {
                   Text(entry.url,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: AppText.body(12,
-                          color: palette.mutedForeground)),
+                      style: AppText.body(12, color: palette.mutedForeground)),
                   const SizedBox(height: 2),
                   Text(_relativeTime(entry.visitedAt),
-                      style: AppText.body(11,
-                          color: palette.mutedForeground)),
+                      style: AppText.body(11, color: palette.mutedForeground)),
                 ],
               ),
             ),
             IconButton(
               tooltip: 'Remove',
-              onPressed: () => HistoryService.instance.remove(entry.id),
+              onPressed: () {
+                HapticFeedback.selectionClick();
+                HistoryService.instance.remove(entry.id);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: const Text('Removed from history'),
+                    action: SnackBarAction(
+                      label: 'Undo',
+                      onPressed: () => HistoryService.instance.restore(entry),
+                    ),
+                  ),
+                );
+              },
               icon: Icon(Icons.close_rounded,
                   size: 18, color: palette.mutedForeground),
             ),
@@ -235,8 +247,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
         color: palette.accent,
         borderRadius: BorderRadius.circular(AppRadius.inner),
       ),
-      child: Icon(Icons.public_rounded,
-          size: 22, color: palette.accentForeground),
+      child:
+          Icon(Icons.public_rounded, size: 22, color: palette.accentForeground),
     );
     if (thumbnail == null || thumbnail.isEmpty) return fallback;
     return ClipRRect(

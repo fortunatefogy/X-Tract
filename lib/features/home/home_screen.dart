@@ -286,9 +286,10 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   int _selectedBytesOf(List<_MediaGroup> groups) => groups
-      .where((group) => _selectedGroups.contains(group.key) && group.downloadable)
-      .map((group) =>
-          (_chosenQuality[group.key] ?? group.defaultItem).size ?? 0)
+      .where(
+          (group) => _selectedGroups.contains(group.key) && group.downloadable)
+      .map(
+          (group) => (_chosenQuality[group.key] ?? group.defaultItem).size ?? 0)
       .fold(0, (sum, size) => sum + size);
 
   String _groupMeta(_MediaGroup group) {
@@ -346,8 +347,8 @@ class _HomeScreenState extends State<HomeScreen> {
     final groups = _groups();
     final selectable =
         groups.where((group) => group.downloadable).toList(growable: false);
-    final allSelected = selectable.isNotEmpty &&
-        _selectedGroups.length == selectable.length;
+    final allSelected =
+        selectable.isNotEmpty && _selectedGroups.length == selectable.length;
     final showActionBar = _selectedGroups.isNotEmpty;
     Widget? status;
     String statusKey = 'none';
@@ -383,7 +384,8 @@ class _HomeScreenState extends State<HomeScreen> {
           children: [
             ListView(
               key: const PageStorageKey('home-scroll'),
-              padding: EdgeInsets.fromLTRB(20, 16, 20, showActionBar ? 120 : 32),
+              padding:
+                  EdgeInsets.fromLTRB(20, 16, 20, showActionBar ? 120 : 32),
               children: [
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -629,8 +631,7 @@ class _HomeScreenState extends State<HomeScreen> {
           children: [
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
-              child: Text('Choose audio format',
-                  style: AppText.heading(18)),
+              child: Text('Choose audio format', style: AppText.heading(18)),
             ),
             ...options.map((item) {
               final details = <String>[
@@ -757,8 +758,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         _groupMeta(group),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: AppText.body(12,
-                            color: palette.mutedForeground),
+                        style: AppText.body(12, color: palette.mutedForeground),
                       ),
                     ],
                   ),
@@ -825,10 +825,8 @@ class _HomeScreenState extends State<HomeScreen> {
                         ? 'Audio only (${audioOptions.length} formats)'
                         : 'Download audio only'),
                     style: TextButton.styleFrom(
-                      padding: EdgeInsets.zero,
-                      minimumSize: const Size(0, 32),
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                       visualDensity: VisualDensity.compact,
+                      minimumSize: const Size(0, 44),
                     ),
                   ),
                 ),
@@ -851,8 +849,7 @@ class _HomeScreenState extends State<HomeScreen> {
       );
     }
     if (previewUrl != null) {
-      final cacheWidth =
-          (56 * MediaQuery.devicePixelRatioOf(context)).round();
+      final cacheWidth = (56 * MediaQuery.devicePixelRatioOf(context)).round();
       return ClipRRect(
         borderRadius: BorderRadius.circular(AppRadius.inner),
         child: Image.network(
@@ -973,7 +970,7 @@ class _HeroCard extends StatelessWidget {
         children: [
           Positioned.fill(
             child: DecoratedBox(
-              decoration: const BoxDecoration(
+              decoration: BoxDecoration(
                 gradient: LinearGradient(
                   colors: [AppColors.heroStart, AppColors.heroEnd],
                   begin: Alignment.topLeft,
@@ -1013,7 +1010,8 @@ class _HeroCard extends StatelessWidget {
               children: [
                 Text(
                   'SMART LINK SCAN',
-                  style: AppText.label(10, color: const Color(0xFFEDE8FF)),
+                  style: AppText.label(10,
+                      color: Colors.white.withValues(alpha: 0.85)),
                 ),
                 const SizedBox(height: 8),
                 Text(
@@ -1030,7 +1028,7 @@ class _HeroCard extends StatelessWidget {
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.link_rounded,
+                      Icon(Icons.link_rounded,
                           size: 18, color: AppColors.primary),
                       const SizedBox(width: 10),
                       Expanded(
@@ -1051,8 +1049,8 @@ class _HeroCard extends StatelessWidget {
                             enabledBorder: InputBorder.none,
                             focusedBorder: InputBorder.none,
                             hintText: 'Paste a webpage or media link',
-                            hintStyle: AppText.body(13,
-                                color: AppColors.slateLight),
+                            hintStyle:
+                                AppText.body(13, color: AppColors.slateLight),
                           ),
                         ),
                       ),
@@ -1062,8 +1060,7 @@ class _HeroCard extends StatelessWidget {
                           backgroundColor: AppColors.primarySoft,
                           foregroundColor: AppColors.primarySoftForeground,
                           shape: const RoundedRectangleBorder(
-                            borderRadius:
-                                BorderRadius.all(Radius.circular(11)),
+                            borderRadius: BorderRadius.all(Radius.circular(11)),
                           ),
                           padding: const EdgeInsets.symmetric(horizontal: 12),
                           minimumSize: const Size(0, 36),
@@ -1092,7 +1089,7 @@ class _HeroCard extends StatelessWidget {
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           if (loading)
-                            const SizedBox(
+                            SizedBox(
                               width: 16,
                               height: 16,
                               child: CircularProgressIndicator(
@@ -1101,7 +1098,7 @@ class _HeroCard extends StatelessWidget {
                               ),
                             )
                           else
-                            const Icon(Icons.search_rounded,
+                            Icon(Icons.search_rounded,
                                 size: 18, color: AppColors.primaryDeep),
                           const SizedBox(width: 8),
                           Text(
@@ -1170,15 +1167,16 @@ class _StatusPill extends StatelessWidget {
             ),
           ),
           if (actionLabel != null)
-            GestureDetector(
-              onTap: onAction,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 6),
-                child: Text(
-                  actionLabel!,
-                  style: AppText.label(10,
-                      color: palette.mutedForeground),
-                ),
+            TextButton(
+              onPressed: onAction,
+              style: TextButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                minimumSize: const Size(0, 44),
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+              ),
+              child: Text(
+                actionLabel!,
+                style: AppText.label(10, color: palette.mutedForeground),
               ),
             ),
         ],
@@ -1204,24 +1202,27 @@ class _SelectBox extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        width: 26,
-        height: 26,
-        decoration: BoxDecoration(
-          color: selected ? AppColors.primary : Colors.transparent,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(
-            color: selected ? AppColors.primary : palette.border,
-            width: 1.6,
+      child: Padding(
+        padding: const EdgeInsets.all(9),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          width: 26,
+          height: 26,
+          decoration: BoxDecoration(
+            color: selected ? AppColors.primary : Colors.transparent,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: selected ? AppColors.primary : palette.border,
+              width: 1.6,
+            ),
           ),
+          child: selected
+              ? const Icon(Icons.check_rounded, size: 16, color: Colors.white)
+              : enabled
+                  ? null
+                  : Icon(Icons.lock_outline_rounded,
+                      size: 13, color: palette.mutedForeground),
         ),
-        child: selected
-            ? const Icon(Icons.check_rounded, size: 16, color: Colors.white)
-            : enabled
-                ? null
-                : Icon(Icons.lock_outline_rounded,
-                    size: 13, color: palette.mutedForeground),
       ),
     );
   }
@@ -1267,8 +1268,7 @@ class _DownloadBar extends StatelessWidget {
                   ),
                   const SizedBox(height: 1),
                   Text('Ready to queue',
-                      style: AppText.body(10,
-                          color: palette.mutedForeground)),
+                      style: AppText.body(10, color: palette.mutedForeground)),
                 ],
               ),
             ),
@@ -1301,10 +1301,9 @@ class _ActiveDownloadsCard extends StatelessWidget {
           final active = DownloadService.instance.active;
           if (active.isEmpty) return const SizedBox.shrink();
           final palette = context.palette;
-          final overall = active
-                  .map((record) => record.progress)
-                  .reduce((a, b) => a + b) /
-              active.length;
+          final overall =
+              active.map((record) => record.progress).reduce((a, b) => a + b) /
+                  active.length;
           final first = active.first;
           final percent = (overall * 100).clamp(0, 100).round();
           final sizeDetail = first.expectedBytes > 0
@@ -1320,8 +1319,8 @@ class _ActiveDownloadsCard extends StatelessWidget {
                     children: [
                       Expanded(
                         child: Text('Active downloads',
-                            style: AppText.heading(16,
-                                weight: FontWeight.w600)),
+                            style:
+                                AppText.heading(16, weight: FontWeight.w600)),
                       ),
                       Text(
                         '${active.length} of ${DownloadService.instance.records.where((r) => !r.state.isFinal).length}',
@@ -1344,8 +1343,7 @@ class _ActiveDownloadsCard extends StatelessWidget {
                               first.title,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: AppText.body(14,
-                                  weight: FontWeight.w600),
+                              style: AppText.body(14, weight: FontWeight.w600),
                             ),
                             const SizedBox(height: 3),
                             Text(
@@ -1403,8 +1401,7 @@ class _ProgressRing extends StatelessWidget {
               strokeCap: StrokeCap.round,
             ),
           ),
-          Text(label,
-              style: AppText.body(11, weight: FontWeight.w800)),
+          Text(label, style: AppText.body(11, weight: FontWeight.w800)),
         ],
       ),
     );

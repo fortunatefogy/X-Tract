@@ -3,14 +3,114 @@ import 'package:flutter/material.dart';
 const String _displayFamily = 'Outfit';
 const String _bodyFamily = 'Manrope';
 
+class AppAccent {
+  const AppAccent({
+    required this.id,
+    required this.name,
+    required this.primary,
+    required this.primaryDeep,
+    required this.primaryPressed,
+    required this.primarySoft,
+    required this.primarySoftForeground,
+    required this.heroStart,
+    required this.heroEnd,
+    required this.accentDark,
+    required this.accentDarkForeground,
+    required this.forestAccent,
+  });
+
+  final String id;
+  final String name;
+  final Color primary;
+  final Color primaryDeep;
+  final Color primaryPressed;
+  final Color primarySoft;
+  final Color primarySoftForeground;
+  final Color heroStart;
+  final Color heroEnd;
+  final Color accentDark;
+  final Color accentDarkForeground;
+  final Color forestAccent;
+
+  static const violet = AppAccent(
+    id: 'violet',
+    name: 'Violet',
+    primary: Color(0xFF6C3BF4),
+    primaryDeep: Color(0xFF530DDC),
+    primaryPressed: Color(0xFF5928E5),
+    primarySoft: Color(0xFFEEE9FF),
+    primarySoftForeground: Color(0xFF4B22C4),
+    heroStart: Color(0xFF8B5CF6),
+    heroEnd: Color(0xFF530DDC),
+    accentDark: Color(0xFF2A2050),
+    accentDarkForeground: Color(0xFFC4B3FF),
+    forestAccent: Color(0xFFB9A4FF),
+  );
+
+  static const teal = AppAccent(
+    id: 'teal',
+    name: 'Teal',
+    primary: Color(0xFF0D9488),
+    primaryDeep: Color(0xFF0F766E),
+    primaryPressed: Color(0xFF0B827A),
+    primarySoft: Color(0xFFCCFBF1),
+    primarySoftForeground: Color(0xFF0F5C52),
+    heroStart: Color(0xFF2DD4BF),
+    heroEnd: Color(0xFF0F766E),
+    accentDark: Color(0xFF0E3B36),
+    accentDarkForeground: Color(0xFF99F6E4),
+    forestAccent: Color(0xFF5EEAD4),
+  );
+
+  static const ocean = AppAccent(
+    id: 'ocean',
+    name: 'Ocean',
+    primary: Color(0xFF2563EB),
+    primaryDeep: Color(0xFF1D4ED8),
+    primaryPressed: Color(0xFF1E56C8),
+    primarySoft: Color(0xFFDBEAFE),
+    primarySoftForeground: Color(0xFF1E3A8A),
+    heroStart: Color(0xFF3B82F6),
+    heroEnd: Color(0xFF1E40AF),
+    accentDark: Color(0xFF172554),
+    accentDarkForeground: Color(0xFF93C5FD),
+    forestAccent: Color(0xFF7DD3FC),
+  );
+
+  static const sunset = AppAccent(
+    id: 'sunset',
+    name: 'Sunset',
+    primary: Color(0xFFF43F5E),
+    primaryDeep: Color(0xFFBE123C),
+    primaryPressed: Color(0xFFE11D48),
+    primarySoft: Color(0xFFFFE4E6),
+    primarySoftForeground: Color(0xFF9F1239),
+    heroStart: Color(0xFFFB7185),
+    heroEnd: Color(0xFFBE123C),
+    accentDark: Color(0xFF3D1220),
+    accentDarkForeground: Color(0xFFFDA4AF),
+    forestAccent: Color(0xFFFECDD3),
+  );
+
+  static const all = <AppAccent>[violet, teal, ocean, sunset];
+
+  static AppAccent current = violet;
+
+  static AppAccent byId(String id) =>
+      all.firstWhere((accent) => accent.id == id, orElse: () => violet);
+}
+
 class AppColors {
-  static const primary = Color(0xFF6C3BF4);
-  static const primaryDeep = Color(0xFF530DDC);
-  static const primaryPressed = Color(0xFF5928E5);
-  static const primarySoft = Color(0xFFEEE9FF);
-  static const primarySoftForeground = Color(0xFF4B22C4);
-  static const heroStart = Color(0xFF8B5CF6);
-  static const heroEnd = Color(0xFF530DDC);
+  static AppAccent get _accent => AppAccent.current;
+
+  static Color get primary => _accent.primary;
+  static Color get primaryDeep => _accent.primaryDeep;
+  static Color get primaryPressed => _accent.primaryPressed;
+  static Color get primarySoft => _accent.primarySoft;
+  static Color get primarySoftForeground => _accent.primarySoftForeground;
+  static Color get heroStart => _accent.heroStart;
+  static Color get heroEnd => _accent.heroEnd;
+  static Color get forestAccent => _accent.forestAccent;
 
   static const teal = Color(0xFF14B8A6);
   static const tealSoft = Color(0xFFE6F8F5);
@@ -36,7 +136,6 @@ class AppColors {
   static const forestBorder = Color(0xFF2B2740);
   static const forestText = Color(0xFFF3F0FF);
   static const forestMuted = Color(0xFFA9A2C4);
-  static const forestAccent = Color(0xFFB9A4FF);
 }
 
 class AppPalette {
@@ -70,36 +169,36 @@ class AppPalette {
   final Color input;
   final Color destructive;
 
-  static const light = AppPalette(
-    background: Color(0xFFF6F7FA),
-    foreground: Color(0xFF13151C),
-    card: Color(0xFFFFFFFF),
-    cardForeground: Color(0xFF13151C),
-    secondary: Color(0xFFEBEDF3),
-    secondaryForeground: Color(0xFF1D2030),
-    muted: Color(0xFFEFF1F6),
-    mutedForeground: Color(0xFF6A7080),
-    accent: Color(0xFFEEE9FF),
-    accentForeground: Color(0xFF4B22C4),
-    border: Color(0xFFE2E5ED),
-    input: Color(0xFFEFF1F6),
-    destructive: Color(0xFFE5484D),
+  static AppPalette get light => AppPalette(
+    background: const Color(0xFFF6F7FA),
+    foreground: const Color(0xFF13151C),
+    card: const Color(0xFFFFFFFF),
+    cardForeground: const Color(0xFF13151C),
+    secondary: const Color(0xFFEBEDF3),
+    secondaryForeground: const Color(0xFF1D2030),
+    muted: const Color(0xFFEFF1F6),
+    mutedForeground: const Color(0xFF6A7080),
+    accent: AppColors.primarySoft,
+    accentForeground: AppColors.primarySoftForeground,
+    border: const Color(0xFFE2E5ED),
+    input: const Color(0xFFEFF1F6),
+    destructive: const Color(0xFFE5484D),
   );
 
-  static const dark = AppPalette(
-    background: Color(0xFF0F1017),
-    foreground: Color(0xFFF2F3F7),
-    card: Color(0xFF171922),
-    cardForeground: Color(0xFFF2F3F7),
-    secondary: Color(0xFF232633),
-    secondaryForeground: Color(0xFFF2F3F7),
-    muted: Color(0xFF1C1F2A),
-    mutedForeground: Color(0xFF9AA1B2),
-    accent: Color(0xFF2A2050),
-    accentForeground: Color(0xFFC4B3FF),
-    border: Color(0xFF2A2D3A),
-    input: Color(0xFF1C1F2A),
-    destructive: Color(0xFFFF8A8E),
+  static AppPalette get dark => AppPalette(
+    background: const Color(0xFF0F1017),
+    foreground: const Color(0xFFF2F3F7),
+    card: const Color(0xFF171922),
+    cardForeground: const Color(0xFFF2F3F7),
+    secondary: const Color(0xFF232633),
+    secondaryForeground: const Color(0xFFF2F3F7),
+    muted: const Color(0xFF1C1F2A),
+    mutedForeground: const Color(0xFF9AA1B2),
+    accent: AppAccent.current.accentDark,
+    accentForeground: AppAccent.current.accentDarkForeground,
+    border: const Color(0xFF2A2D3A),
+    input: const Color(0xFF1C1F2A),
+    destructive: const Color(0xFFFF8A8E),
   );
 }
 
@@ -335,7 +434,7 @@ class AppTheme {
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(AppRadius.pill),
-          borderSide: const BorderSide(color: AppColors.primary, width: 1.6),
+          borderSide: BorderSide(color: AppColors.primary, width: 1.6),
         ),
       ),
       snackBarTheme: SnackBarThemeData(
@@ -400,7 +499,7 @@ class AppTheme {
         textColor: palette.foreground,
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
       ),
-      progressIndicatorTheme: const ProgressIndicatorThemeData(
+      progressIndicatorTheme: ProgressIndicatorThemeData(
         color: AppColors.primary,
         linearMinHeight: 6,
       ),

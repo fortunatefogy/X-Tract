@@ -153,6 +153,15 @@ class HistoryService extends ChangeNotifier {
     await _save();
   }
 
+  Future<void> restore(HistoryEntry entry) async {
+    if (_entries.any((existing) => existing.id == entry.id)) return;
+    final index = _entries
+        .indexWhere((existing) => existing.visitedAt.isBefore(entry.visitedAt));
+    _entries.insert(index < 0 ? _entries.length : index, entry);
+    notifyListeners();
+    await _save();
+  }
+
   Future<void> clear() async {
     if (_entries.isEmpty) return;
     _entries.clear();

@@ -1553,8 +1553,8 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
         }
         if (stale.isNotEmpty && tab == _tab) setState(() {});
       } else {
-        final authoritative = tab.candidates.values.any((item) =>
-            item.type == 'image' && item.foundIn == 'post images');
+        final authoritative = tab.candidates.values.any(
+            (item) => item.type == 'image' && item.foundIn == 'post images');
         if (authoritative) return;
       }
     }
@@ -2823,360 +2823,366 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
       builder: (sheetContext) => Theme(
         data: AppTheme.dark,
         child: StatefulBuilder(
-        builder: (sheetContext, setSheetState) {
-          final grouped = <String, Map<String, List<MediaItem>>>{};
-          final playingVideos = _playingVideos;
-          final hasPlayingVideo = playingVideos.isNotEmpty;
-          final playingGroups = <String>{
-            for (final item in playingVideos)
-              if (item.groupTitle != null) item.groupTitle!,
-          };
-          final playingKeys = <String>{
-            for (final item in playingVideos) _normalizedCandidateKey(item.url),
-          };
-          for (final item in _candidates.values) {
-            if (videosOnly && item.type != 'video') continue;
-            if (!SettingsService.instance.isTypeEnabled(item.type)) continue;
-            if (!SettingsService.instance.passesSizeThreshold(item.size)) {
-              continue;
+          builder: (sheetContext, setSheetState) {
+            final grouped = <String, Map<String, List<MediaItem>>>{};
+            final playingVideos = _playingVideos;
+            final hasPlayingVideo = playingVideos.isNotEmpty;
+            final playingGroups = <String>{
+              for (final item in playingVideos)
+                if (item.groupTitle != null) item.groupTitle!,
+            };
+            final playingKeys = <String>{
+              for (final item in playingVideos)
+                _normalizedCandidateKey(item.url),
+            };
+            for (final item in _candidates.values) {
+              if (videosOnly && item.type != 'video') continue;
+              if (!SettingsService.instance.isTypeEnabled(item.type)) continue;
+              if (!SettingsService.instance.passesSizeThreshold(item.size)) {
+                continue;
+              }
+              final lowQualityImage = item.type == 'image' &&
+                  _isJunkImage(item.url, item.width, item.height, item.foundIn);
+              final hideImageForPlaying = hasPlayingVideo &&
+                  item.type == 'image' &&
+                  item.foundIn != 'post images';
+              final hideVideoForPlaying = SettingsService
+                      .instance.onlyPlayingVideo &&
+                  hasPlayingVideo &&
+                  item.type == 'video' &&
+                  !item.isPlaying &&
+                  !playingKeys.contains(_normalizedCandidateKey(item.url)) &&
+                  (item.groupTitle == null ||
+                      !playingGroups.contains(item.groupTitle));
+              if (hideVideoForPlaying) {
+                continue;
+              }
+              if (filterUnwanted && (lowQualityImage || hideImageForPlaying)) {
+                continue;
+              }
+              final baseType = item.type.replaceFirst('platform-', '');
+              final category = item.type.startsWith('platform-')
+                  ? 'platform'
+                  : categoryLabels.containsKey(baseType)
+                      ? baseType
+                      : 'other';
+              final groupKey = item.groupTitle != null
+                  ? '${item.sourcePage}|${item.type}|${item.groupTitle}'
+                  : '${item.type}|${item.url}';
+              grouped
+                  .putIfAbsent(category, () => {})
+                  .putIfAbsent(groupKey, () => [])
+                  .add(item);
             }
-            final lowQualityImage = item.type == 'image' &&
-                _isJunkImage(item.url, item.width, item.height, item.foundIn);
-            final hideImageForPlaying = hasPlayingVideo &&
-                item.type == 'image' &&
-                item.foundIn != 'post images';
-            final hideVideoForPlaying =
-                SettingsService.instance.onlyPlayingVideo &&
-                    hasPlayingVideo &&
-                    item.type == 'video' &&
-                    !item.isPlaying &&
-                    !playingKeys.contains(_normalizedCandidateKey(item.url)) &&
-                    (item.groupTitle == null ||
-                        !playingGroups.contains(item.groupTitle));
-            if (hideVideoForPlaying) {
-              continue;
+            for (final bucket in grouped.values) {
+              for (final options in bucket.values) {
+                options.sort(_compareCandidateOptions);
+              }
+              final ordered = bucket.entries.toList()
+                ..sort((a, b) {
+                  final aPlaying = a.value.any((item) => item.isPlaying);
+                  final bPlaying = b.value.any((item) => item.isPlaying);
+                  if (aPlaying != bPlaying) return aPlaying ? -1 : 1;
+                  return _compareCandidateOptions(a.value.first, b.value.first);
+                });
+              bucket
+                ..clear()
+                ..addEntries(ordered);
             }
-            if (filterUnwanted && (lowQualityImage || hideImageForPlaying)) {
-              continue;
-            }
-            final baseType = item.type.replaceFirst('platform-', '');
-            final category = item.type.startsWith('platform-')
-                ? 'platform'
-                : categoryLabels.containsKey(baseType)
-                    ? baseType
-                    : 'other';
-            final groupKey = item.groupTitle != null
-                ? '${item.sourcePage}|${item.type}|${item.groupTitle}'
-                : '${item.type}|${item.url}';
-            grouped
-                .putIfAbsent(category, () => {})
-                .putIfAbsent(groupKey, () => [])
-                .add(item);
-          }
-          for (final bucket in grouped.values) {
-            for (final options in bucket.values) {
-              options.sort(_compareCandidateOptions);
-            }
-            final ordered = bucket.entries.toList()
-              ..sort((a, b) {
-                final aPlaying = a.value.any((item) => item.isPlaying);
-                final bPlaying = b.value.any((item) => item.isPlaying);
-                if (aPlaying != bPlaying) return aPlaying ? -1 : 1;
-                return _compareCandidateOptions(a.value.first, b.value.first);
-              });
-            bucket
-              ..clear()
-              ..addEntries(ordered);
-          }
-          final counts = <String, int>{
-            for (final category in categoryOrder)
-              category: grouped[category]?.values.fold<int>(
-                        0,
-                        (sum, options) => sum + options.length,
-                      ) ??
-                  0,
-          };
-          final presentCategories = categoryOrder
-              .where((category) => (counts[category] ?? 0) > 0)
-              .toList(growable: false);
-          final effectiveFilter =
-              categoryFilter == 'all' || (counts[categoryFilter] ?? 0) > 0
-                  ? categoryFilter
-                  : 'all';
-          final totalCount =
-              counts.values.fold<int>(0, (sum, value) => sum + value);
-          Widget categoryChip(String value, String label, int count) {
-            final selected = effectiveFilter == value;
-            final palette = sheetContext.palette;
-            return Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: ChoiceChip(
-                selected: selected,
-                showCheckmark: false,
-                selectedColor: AppColors.primary,
-                backgroundColor: palette.card,
-                side: BorderSide(
-                  color: selected ? AppColors.primary : palette.border,
+            final counts = <String, int>{
+              for (final category in categoryOrder)
+                category: grouped[category]?.values.fold<int>(
+                          0,
+                          (sum, options) => sum + options.length,
+                        ) ??
+                    0,
+            };
+            final presentCategories = categoryOrder
+                .where((category) => (counts[category] ?? 0) > 0)
+                .toList(growable: false);
+            final effectiveFilter =
+                categoryFilter == 'all' || (counts[categoryFilter] ?? 0) > 0
+                    ? categoryFilter
+                    : 'all';
+            final totalCount =
+                counts.values.fold<int>(0, (sum, value) => sum + value);
+            Widget categoryChip(String value, String label, int count) {
+              final selected = effectiveFilter == value;
+              final palette = sheetContext.palette;
+              return Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: ChoiceChip(
+                  selected: selected,
+                  showCheckmark: false,
+                  selectedColor: AppColors.primary,
+                  backgroundColor: palette.card,
+                  side: BorderSide(
+                    color: selected ? AppColors.primary : palette.border,
+                  ),
+                  labelStyle: AppText.body(
+                    12,
+                    weight: selected ? FontWeight.w700 : FontWeight.w600,
+                    color: selected ? Colors.white : palette.foreground,
+                  ),
+                  label: Text('$label ($count)'),
+                  onSelected: (_) =>
+                      setSheetState(() => categoryFilter = value),
                 ),
-                labelStyle: AppText.body(
-                  12,
-                  weight: selected ? FontWeight.w700 : FontWeight.w600,
-                  color: selected ? Colors.white : palette.foreground,
-                ),
-                label: Text('$label ($count)'),
-                onSelected: (_) => setSheetState(() => categoryFilter = value),
-              ),
-            );
-          }
+              );
+            }
 
-          return SafeArea(
-            child: SizedBox(
-              height: 500,
-              child: ListView(
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          videosOnly ? 'Video options' : 'Media found',
-                          style: AppText.heading(20,
-                              color: sheetContext.palette.foreground),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          '${_candidates.length} item${_candidates.length == 1 ? '' : 's'} on this page',
-                          style: AppText.body(12,
-                              color: sheetContext.palette.mutedForeground),
-                        ),
-                      ],
-                    ),
-                  ),
-                  SwitchListTile(
-                    title:
-                        const Text('Filter icons, thumbnails, and UI images'),
-                    value: filterUnwanted,
-                    onChanged: (value) {
-                      setSheetState(() => filterUnwanted = value);
-                      SettingsService.instance.setFilterJunkMedia(value);
-                    },
-                  ),
-                  if (!videosOnly && presentCategories.length > 1)
-                    SizedBox(
-                      height: 44,
-                      child: ListView(
-                        scrollDirection: Axis.horizontal,
-                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            return SafeArea(
+              child: SizedBox(
+                height: 500,
+                child: ListView(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          categoryChip('all', 'All', totalCount),
-                          for (final category in presentCategories)
-                            categoryChip(
-                              category,
-                              categoryLabels[category]!,
-                              counts[category] ?? 0,
-                            ),
+                          Text(
+                            videosOnly ? 'Video options' : 'Media found',
+                            style: AppText.heading(20,
+                                color: sheetContext.palette.foreground),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            '${_candidates.length} item${_candidates.length == 1 ? '' : 's'} on this page',
+                            style: AppText.body(12,
+                                color: sheetContext.palette.mutedForeground),
+                          ),
                         ],
                       ),
                     ),
-                  ...categoryOrder
-                      .where((category) =>
-                          grouped.containsKey(category) &&
-                          (effectiveFilter == 'all' ||
-                              effectiveFilter == category))
-                      .expand((category) => [
-                            Padding(
-                              padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-                              child: Text(
-                                '${categoryLabels[category]} (${grouped[category]!.length})',
-                                style: Theme.of(sheetContext)
-                                    .textTheme
-                                    .titleSmall
-                                    ?.copyWith(fontWeight: FontWeight.w700),
+                    SwitchListTile(
+                      title:
+                          const Text('Filter icons, thumbnails, and UI images'),
+                      value: filterUnwanted,
+                      onChanged: (value) {
+                        setSheetState(() => filterUnwanted = value);
+                        SettingsService.instance.setFilterJunkMedia(value);
+                      },
+                    ),
+                    if (!videosOnly && presentCategories.length > 1)
+                      SizedBox(
+                        height: 44,
+                        child: ListView(
+                          scrollDirection: Axis.horizontal,
+                          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                          children: [
+                            categoryChip('all', 'All', totalCount),
+                            for (final category in presentCategories)
+                              categoryChip(
+                                category,
+                                categoryLabels[category]!,
+                                counts[category] ?? 0,
                               ),
-                            ),
-                            ...grouped[category]!.entries.expand((entry) {
-                              final options = entry.value;
-                              final pickKey = '$category|${entry.key}';
-                              final item = picked[pickKey] ?? options.first;
-                              final uri = Uri.parse(item.url);
-                              final hls =
-                                  uri.path.toLowerCase().endsWith('.m3u8') ||
-                                      uri.path.toLowerCase().endsWith('.m3u') ||
-                                      item.mimeType
-                                              ?.toLowerCase()
-                                              .contains('mpegurl') ==
-                                          true;
-                              final dash =
-                                  uri.path.toLowerCase().endsWith('.mpd') ||
-                                      item.mimeType
-                                              ?.toLowerCase()
-                                              .contains('dash+xml') ==
-                                          true;
-                              final dashSegmented =
-                                  uri.path.toLowerCase().endsWith('.pls') ||
-                                      uri.path.toLowerCase().endsWith('.asx') ||
-                                      item.mimeType
-                                              ?.toLowerCase()
-                                              .contains('scpls') ==
-                                          true;
-                              final unavailable =
-                                  (dashSegmented && item.formatId == null) ||
-                                      item.type == 'embed' ||
-                                      item.type == 'subtitle' ||
-                                      item.type.startsWith('platform-') ||
-                                      !item.isDownloadable;
-                              final canPreview = (item.type == 'video' ||
-                                      item.type == 'audio') &&
-                                  uri.scheme != 'blob' &&
-                                  !dash &&
-                                  !dashSegmented &&
-                                  !unavailable;
-                              final securityHint = _securityHint(uri);
-                              final details = <String>[
-                                if (options.length == 1)
-                                  _candidateOptionLabel(item),
-                                if (item.isPlaying) 'PLAYING NOW',
-                                if (item.durationSeconds != null)
-                                  _formatDuration(item.durationSeconds!),
-                                if (item.uploader?.isNotEmpty == true)
-                                  item.uploader!,
-                                if (item.width != null &&
-                                    item.height != null &&
-                                    item.width! > 0 &&
-                                    item.height! > 0)
-                                  '${item.width} × ${item.height}',
-                                if (item.alt?.isNotEmpty == true) item.alt!,
-                                if (item.foundIn?.isNotEmpty == true)
-                                  'Found in ${item.foundIn}',
-                                if (securityHint != null) securityHint,
-                              ];
-                              return [
-                                ListTile(
-                                  leading: item.type == 'image' ||
-                                          item.type == 'video'
-                                      ? MediaThumbnail(
-                                          type: item.type,
-                                          url: item.url,
-                                          poster: item.thumbnail,
-                                          size: 48,
-                                          fallback: Icon(item.type == 'image'
-                                              ? Icons.image_outlined
-                                              : Icons.movie_outlined),
-                                        )
-                                      : Icon(item.type == 'audio'
-                                          ? Icons.audiotrack
-                                          : item.type == 'document'
-                                              ? Icons.description_outlined
-                                              : Icons.movie_outlined),
-                                  title: Text(
-                                      item.groupTitle ??
-                                          item.title ??
-                                          categoryLabels[category]!,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis),
-                                  isThreeLine:
-                                      details.isNotEmpty || options.length > 1,
-                                  subtitle: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(hls
-                                          ? 'HLS stream · segments saved by the on-device downloader'
-                                          : dash
-                                              ? 'DASH stream · segments saved by the on-device downloader'
-                                              : dashSegmented
-                                                  ? 'Playlist stream · not supported yet'
-                                                  : uri.scheme == 'blob'
-                                                      ? 'Browser blob · page-side capture available if readable'
-                                                      : item.type == 'embed'
-                                                          ? 'Embedded player · open it to detect its media'
-                                                          : item.type.startsWith(
-                                                                      'platform-') ||
-                                                                  !item
-                                                                      .isDownloadable
-                                                              ? 'Platform page detected · direct media URL not exposed'
-                                                              : item.type ==
-                                                                      'subtitle'
-                                                                  ? 'Subtitle track'
-                                                                  : uri.host),
-                                      if (options.length > 1)
-                                        DropdownButtonHideUnderline(
-                                          child: DropdownButton<MediaItem>(
-                                            value: item,
-                                            isDense: true,
-                                            isExpanded: true,
-                                            items: options
-                                                .map((option) =>
-                                                    DropdownMenuItem<MediaItem>(
-                                                      value: option,
-                                                      child: Text(
-                                                        _candidateOptionLabel(
-                                                            option),
-                                                        maxLines: 1,
-                                                        overflow: TextOverflow
-                                                            .ellipsis,
-                                                      ),
-                                                    ))
-                                                .toList(growable: false),
-                                            onChanged: (option) {
-                                              if (option == null) return;
-                                              setSheetState(() =>
-                                                  picked[pickKey] = option);
-                                            },
-                                          ),
-                                        ),
-                                      ...details.map((line) => Text(line,
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: TextStyle(
-                                              color: securityHint != null &&
-                                                      line == securityHint
-                                                  ? Theme.of(sheetContext)
-                                                      .colorScheme
-                                                      .error
-                                                  : null))),
-                                    ],
-                                  ),
-                                  trailing: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      if (canPreview)
-                                        IconButton(
-                                          tooltip: 'Preview stream',
-                                          onPressed: () =>
-                                              _previewCandidate(item),
-                                          icon: const Icon(
-                                            Icons.play_circle_outline,
-                                          ),
-                                        ),
-                                      IconButton(
-                                        tooltip: unavailable
-                                            ? 'Not directly downloadable'
-                                            : 'Download ${item.type}',
-                                        onPressed: unavailable || _downloading
-                                            ? null
-                                            : () => _downloadCandidate(item),
-                                        icon: _downloading
-                                            ? const SizedBox(
-                                                width: 20,
-                                                height: 20,
-                                                child:
-                                                    CircularProgressIndicator(
-                                                        strokeWidth: 2))
-                                            : const Icon(Icons.download),
-                                      ),
-                                    ],
-                                  ),
+                          ],
+                        ),
+                      ),
+                    ...categoryOrder
+                        .where((category) =>
+                            grouped.containsKey(category) &&
+                            (effectiveFilter == 'all' ||
+                                effectiveFilter == category))
+                        .expand((category) => [
+                              Padding(
+                                padding:
+                                    const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                                child: Text(
+                                  '${categoryLabels[category]} (${grouped[category]!.length})',
+                                  style: Theme.of(sheetContext)
+                                      .textTheme
+                                      .titleSmall
+                                      ?.copyWith(fontWeight: FontWeight.w700),
                                 ),
-                              ];
-                            }),
-                          ]),
-                ],
+                              ),
+                              ...grouped[category]!.entries.expand((entry) {
+                                final options = entry.value;
+                                final pickKey = '$category|${entry.key}';
+                                final item = picked[pickKey] ?? options.first;
+                                final uri = Uri.parse(item.url);
+                                final hls = uri.path
+                                        .toLowerCase()
+                                        .endsWith('.m3u8') ||
+                                    uri.path.toLowerCase().endsWith('.m3u') ||
+                                    item.mimeType
+                                            ?.toLowerCase()
+                                            .contains('mpegurl') ==
+                                        true;
+                                final dash =
+                                    uri.path.toLowerCase().endsWith('.mpd') ||
+                                        item.mimeType
+                                                ?.toLowerCase()
+                                                .contains('dash+xml') ==
+                                            true;
+                                final dashSegmented = uri.path
+                                        .toLowerCase()
+                                        .endsWith('.pls') ||
+                                    uri.path.toLowerCase().endsWith('.asx') ||
+                                    item.mimeType
+                                            ?.toLowerCase()
+                                            .contains('scpls') ==
+                                        true;
+                                final unavailable =
+                                    (dashSegmented && item.formatId == null) ||
+                                        item.type == 'embed' ||
+                                        item.type == 'subtitle' ||
+                                        item.type.startsWith('platform-') ||
+                                        !item.isDownloadable;
+                                final canPreview = (item.type == 'video' ||
+                                        item.type == 'audio') &&
+                                    uri.scheme != 'blob' &&
+                                    !dash &&
+                                    !dashSegmented &&
+                                    !unavailable;
+                                final securityHint = _securityHint(uri);
+                                final details = <String>[
+                                  if (options.length == 1)
+                                    _candidateOptionLabel(item),
+                                  if (item.isPlaying) 'PLAYING NOW',
+                                  if (item.durationSeconds != null)
+                                    _formatDuration(item.durationSeconds!),
+                                  if (item.uploader?.isNotEmpty == true)
+                                    item.uploader!,
+                                  if (item.width != null &&
+                                      item.height != null &&
+                                      item.width! > 0 &&
+                                      item.height! > 0)
+                                    '${item.width} × ${item.height}',
+                                  if (item.alt?.isNotEmpty == true) item.alt!,
+                                  if (item.foundIn?.isNotEmpty == true)
+                                    'Found in ${item.foundIn}',
+                                  if (securityHint != null) securityHint,
+                                ];
+                                return [
+                                  ListTile(
+                                    leading: item.type == 'image' ||
+                                            item.type == 'video'
+                                        ? MediaThumbnail(
+                                            type: item.type,
+                                            url: item.url,
+                                            poster: item.thumbnail,
+                                            size: 48,
+                                            fallback: Icon(item.type == 'image'
+                                                ? Icons.image_outlined
+                                                : Icons.movie_outlined),
+                                          )
+                                        : Icon(item.type == 'audio'
+                                            ? Icons.audiotrack
+                                            : item.type == 'document'
+                                                ? Icons.description_outlined
+                                                : Icons.movie_outlined),
+                                    title: Text(
+                                        item.groupTitle ??
+                                            item.title ??
+                                            categoryLabels[category]!,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis),
+                                    isThreeLine: details.isNotEmpty ||
+                                        options.length > 1,
+                                    subtitle: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(hls
+                                            ? 'HLS stream · segments saved by the on-device downloader'
+                                            : dash
+                                                ? 'DASH stream · segments saved by the on-device downloader'
+                                                : dashSegmented
+                                                    ? 'Playlist stream · not supported yet'
+                                                    : uri.scheme == 'blob'
+                                                        ? 'Browser blob · page-side capture available if readable'
+                                                        : item.type == 'embed'
+                                                            ? 'Embedded player · open it to detect its media'
+                                                            : item.type.startsWith(
+                                                                        'platform-') ||
+                                                                    !item
+                                                                        .isDownloadable
+                                                                ? 'Platform page detected · direct media URL not exposed'
+                                                                : item.type ==
+                                                                        'subtitle'
+                                                                    ? 'Subtitle track'
+                                                                    : uri.host),
+                                        if (options.length > 1)
+                                          DropdownButtonHideUnderline(
+                                            child: DropdownButton<MediaItem>(
+                                              value: item,
+                                              isDense: true,
+                                              isExpanded: true,
+                                              items: options
+                                                  .map((option) =>
+                                                      DropdownMenuItem<
+                                                          MediaItem>(
+                                                        value: option,
+                                                        child: Text(
+                                                          _candidateOptionLabel(
+                                                              option),
+                                                          maxLines: 1,
+                                                          overflow: TextOverflow
+                                                              .ellipsis,
+                                                        ),
+                                                      ))
+                                                  .toList(growable: false),
+                                              onChanged: (option) {
+                                                if (option == null) return;
+                                                setSheetState(() =>
+                                                    picked[pickKey] = option);
+                                              },
+                                            ),
+                                          ),
+                                        ...details.map((line) => Text(line,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: TextStyle(
+                                                color: securityHint != null &&
+                                                        line == securityHint
+                                                    ? Theme.of(sheetContext)
+                                                        .colorScheme
+                                                        .error
+                                                    : null))),
+                                      ],
+                                    ),
+                                    trailing: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        if (canPreview)
+                                          IconButton(
+                                            tooltip: 'Preview stream',
+                                            onPressed: () =>
+                                                _previewCandidate(item),
+                                            icon: const Icon(
+                                              Icons.play_circle_outline,
+                                            ),
+                                          ),
+                                        IconButton(
+                                          tooltip: unavailable
+                                              ? 'Not directly downloadable'
+                                              : 'Download ${item.type}',
+                                          onPressed: unavailable || _downloading
+                                              ? null
+                                              : () => _downloadCandidate(item),
+                                          icon: _downloading
+                                              ? const SizedBox(
+                                                  width: 20,
+                                                  height: 20,
+                                                  child:
+                                                      CircularProgressIndicator(
+                                                          strokeWidth: 2))
+                                              : const Icon(Icons.download),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ];
+                              }),
+                            ]),
+                  ],
+                ),
               ),
-            ),
-          );
-        },
+            );
+          },
         ),
       ),
     );
@@ -3198,106 +3204,107 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
       builder: (sheetContext) => Theme(
         data: AppTheme.dark,
         child: StatefulBuilder(
-        builder: (sheetContext, setSheetState) => SafeArea(
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 4, 12, 8),
-                  child: Row(
-                    children: [
-                      Expanded(child: Text('Tabs', style: AppText.heading(18))),
-                      TextButton.icon(
-                        onPressed: () => setSheetState(() => _addTab()),
-                        icon: const Icon(Icons.add_rounded, size: 18),
-                        label: const Text('New tab'),
-                      ),
-                    ],
+          builder: (sheetContext, setSheetState) => SafeArea(
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 4, 12, 8),
+                    child: Row(
+                      children: [
+                        Expanded(
+                            child: Text('Tabs', style: AppText.heading(18))),
+                        TextButton.icon(
+                          onPressed: () => setSheetState(() => _addTab()),
+                          icon: const Icon(Icons.add_rounded, size: 18),
+                          label: const Text('New tab'),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-                for (var i = 0; i < _tabs.length; i++)
+                  for (var i = 0; i < _tabs.length; i++)
+                    ListTile(
+                      selected: i == _activeIndex,
+                      selectedTileColor: palette.accent,
+                      leading: Icon(
+                        Icons.public_rounded,
+                        color: i == _activeIndex
+                            ? AppColors.primary
+                            : palette.mutedForeground,
+                      ),
+                      title: Text(
+                        _tabLabel(_tabs[i]),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppText.body(
+                          14,
+                          weight: i == _activeIndex
+                              ? FontWeight.w700
+                              : FontWeight.w500,
+                        ),
+                      ),
+                      trailing: IconButton(
+                        tooltip: 'Close tab',
+                        onPressed: () => setSheetState(() {
+                          _closeTab(i);
+                        }),
+                        icon: const Icon(Icons.close_rounded, size: 18),
+                      ),
+                      onTap: () {
+                        setSheetState(() => _selectTab(i));
+                        Navigator.of(sheetContext).pop();
+                      },
+                    ),
+                  Divider(height: 20, color: palette.border),
                   ListTile(
-                    selected: i == _activeIndex,
-                    selectedTileColor: palette.accent,
                     leading: Icon(
-                      Icons.public_rounded,
-                      color: i == _activeIndex
-                          ? AppColors.primary
-                          : palette.mutedForeground,
+                      _tab.desktopMode
+                          ? Icons.phone_iphone_rounded
+                          : Icons.desktop_windows_rounded,
                     ),
                     title: Text(
-                      _tabLabel(_tabs[i]),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: AppText.body(
-                        14,
-                        weight: i == _activeIndex
-                            ? FontWeight.w700
-                            : FontWeight.w500,
-                      ),
-                    ),
-                    trailing: IconButton(
-                      tooltip: 'Close tab',
-                      onPressed: () => setSheetState(() {
-                        _closeTab(i);
-                      }),
-                      icon: const Icon(Icons.close_rounded, size: 18),
+                      _tab.desktopMode
+                          ? 'Switch to mobile site'
+                          : 'Switch to desktop site',
                     ),
                     onTap: () {
-                      setSheetState(() => _selectTab(i));
                       Navigator.of(sheetContext).pop();
+                      _toggleDesktopMode();
                     },
                   ),
-                Divider(height: 20, color: palette.border),
-                ListTile(
-                  leading: Icon(
-                    _tab.desktopMode
-                        ? Icons.phone_iphone_rounded
-                        : Icons.desktop_windows_rounded,
+                  ListTile(
+                    leading: Icon(
+                      BookmarksService.instance
+                              .isBookmarked(_addressController.text.trim())
+                          ? Icons.bookmark_rounded
+                          : Icons.bookmark_border_rounded,
+                    ),
+                    title: Text(
+                      BookmarksService.instance
+                              .isBookmarked(_addressController.text.trim())
+                          ? 'Remove bookmark'
+                          : 'Bookmark this page',
+                    ),
+                    onTap: () {
+                      Navigator.of(sheetContext).pop();
+                      _toggleBookmark();
+                    },
                   ),
-                  title: Text(
-                    _tab.desktopMode
-                        ? 'Switch to mobile site'
-                        : 'Switch to desktop site',
+                  ListTile(
+                    leading: const Icon(Icons.settings_outlined),
+                    title: const Text('Browser settings'),
+                    onTap: () {
+                      Navigator.of(sheetContext).pop();
+                      _showBrowserMenu();
+                    },
                   ),
-                  onTap: () {
-                    Navigator.of(sheetContext).pop();
-                    _toggleDesktopMode();
-                  },
-                ),
-                ListTile(
-                  leading: Icon(
-                    BookmarksService.instance
-                            .isBookmarked(_addressController.text.trim())
-                        ? Icons.bookmark_rounded
-                        : Icons.bookmark_border_rounded,
-                  ),
-                  title: Text(
-                    BookmarksService.instance
-                            .isBookmarked(_addressController.text.trim())
-                        ? 'Remove bookmark'
-                        : 'Bookmark this page',
-                  ),
-                  onTap: () {
-                    Navigator.of(sheetContext).pop();
-                    _toggleBookmark();
-                  },
-                ),
-                ListTile(
-                  leading: const Icon(Icons.settings_outlined),
-                  title: const Text('Browser settings'),
-                  onTap: () {
-                    Navigator.of(sheetContext).pop();
-                    _showBrowserMenu();
-                  },
-                ),
-                const SizedBox(height: 8),
-              ],
+                  const SizedBox(height: 8),
+                ],
+              ),
             ),
           ),
-        ),
         ),
       ),
     );
@@ -3773,136 +3780,137 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
       builder: (sheetContext) => Theme(
         data: AppTheme.dark,
         child: StatefulBuilder(
-        builder: (sheetContext, setSheetState) {
-          void open(Widget screen) {
-            Navigator.of(sheetContext).pop();
-            Navigator.of(context).push(
-              MaterialPageRoute<void>(builder: (_) => screen),
-            );
-          }
+          builder: (sheetContext, setSheetState) {
+            void open(Widget screen) {
+              Navigator.of(sheetContext).pop();
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(builder: (_) => screen),
+              );
+            }
 
-          return SafeArea(
-            child: ConstrainedBox(
-              constraints: BoxConstraints(
-                maxHeight: MediaQuery.of(sheetContext).size.height * 0.85,
-              ),
-              child: ListView(
-                shrinkWrap: true,
-                children: [
-                  const Padding(
-                    padding: EdgeInsets.fromLTRB(20, 4, 20, 8),
-                    child: Text(
-                      'Browser settings',
-                      style:
-                          TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+            return SafeArea(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.of(sheetContext).size.height * 0.85,
+                ),
+                child: ListView(
+                  shrinkWrap: true,
+                  children: [
+                    const Padding(
+                      padding: EdgeInsets.fromLTRB(20, 4, 20, 8),
+                      child: Text(
+                        'Browser settings',
+                        style: TextStyle(
+                            fontSize: 18, fontWeight: FontWeight.w700),
+                      ),
                     ),
-                  ),
-                  ListTile(
-                    leading: const Icon(Icons.history),
-                    title: const Text('History'),
-                    onTap: () => open(const HistoryScreen()),
-                  ),
-                  ListTile(
-                    leading: const Icon(Icons.bookmark_border),
-                    title: const Text('Bookmarks'),
-                    onTap: () => open(const BookmarksScreen()),
-                  ),
-                  ListTile(
-                    leading: const Icon(Icons.download_outlined),
-                    title: const Text('Downloads'),
-                    onTap: () => open(const DownloadsScreen()),
-                  ),
-                  ListTile(
-                    leading: const Icon(Icons.tune),
-                    title: const Text('All settings'),
-                    subtitle:
-                        const Text('Detection, storage, proxy, DNS and more'),
-                    onTap: () => open(const SettingsScreen()),
-                  ),
-                  ListTile(
-                    leading: const Icon(Icons.cleaning_services_outlined),
-                    title: const Text('Clear browsing data'),
-                    subtitle:
-                        const Text('Cookies, cache, site data and history'),
-                    onTap: () {
-                      Navigator.of(sheetContext).pop();
-                      _showClearBrowsingData();
-                    },
-                  ),
-                  ListTile(
-                    leading: const Icon(Icons.search),
-                    title: Text('Search engine: ${settings.searchEngineName}'),
-                    subtitle:
-                        const Text('Change the start page and search engine'),
-                    onTap: () => open(const SettingsScreen()),
-                  ),
-                  const Divider(),
-                  SwitchListTile(
-                    secondary: const Icon(Icons.shield_outlined),
-                    value: settings.adBlockEnabled,
-                    title: const Text('Ad blocker'),
-                    subtitle: const Text(
-                        'uBlock Origin and EasyList filters for ads, trackers and junk elements.'),
-                    onChanged: (value) async {
-                      await settings.setAdBlockEnabled(value);
-                      _syncAdBlockState(value);
-                      setSheetState(() {});
-                    },
-                  ),
-                  SwitchListTile(
-                    secondary: const Icon(Icons.block),
-                    value: settings.blockPopups,
-                    title: const Text('Block pop-ups and redirect ads'),
-                    subtitle:
-                        const Text('Applies to newly opened pages and tabs.'),
-                    onChanged: (value) async {
-                      await settings.setBlockPopups(value);
-                      setSheetState(() {});
-                    },
-                  ),
-                  SwitchListTile(
-                    secondary: const Icon(Icons.open_in_new),
-                    value: settings.redirectPromptEnabled,
-                    title: const Text('Ask before cross-site redirects'),
-                    onChanged: (value) async {
-                      await settings.setRedirectPromptEnabled(value);
-                      setSheetState(() {});
-                    },
-                  ),
-                  SwitchListTile(
-                    secondary: const Icon(Icons.play_circle_outline),
-                    value: settings.onlyPlayingVideo,
-                    title: const Text('Only show the playing video'),
-                    onChanged: (value) async {
-                      await settings.setOnlyPlayingVideo(value);
-                      setSheetState(() {});
-                    },
-                  ),
-                  SwitchListTile(
-                    secondary: const Icon(Icons.filter_alt_outlined),
-                    value: settings.filterJunkMedia,
-                    title: const Text('Filter junk media'),
-                    onChanged: (value) async {
-                      await settings.setFilterJunkMedia(value);
-                      setSheetState(() {});
-                    },
-                  ),
-                  SwitchListTile(
-                    secondary: const Icon(Icons.desktop_windows_outlined),
-                    value: _tab.desktopMode,
-                    title: const Text('Desktop site'),
-                    subtitle:
-                        const Text('Use a desktop user agent and viewport.'),
-                    onChanged: (_) async {
-                      await _toggleDesktopMode();
-                      setSheetState(() {});
-                    },
-                  ),
-                ],
+                    ListTile(
+                      leading: const Icon(Icons.history),
+                      title: const Text('History'),
+                      onTap: () => open(const HistoryScreen()),
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.bookmark_border),
+                      title: const Text('Bookmarks'),
+                      onTap: () => open(const BookmarksScreen()),
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.download_outlined),
+                      title: const Text('Downloads'),
+                      onTap: () => open(const DownloadsScreen()),
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.tune),
+                      title: const Text('All settings'),
+                      subtitle:
+                          const Text('Detection, storage, proxy, DNS and more'),
+                      onTap: () => open(const SettingsScreen()),
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.cleaning_services_outlined),
+                      title: const Text('Clear browsing data'),
+                      subtitle:
+                          const Text('Cookies, cache, site data and history'),
+                      onTap: () {
+                        Navigator.of(sheetContext).pop();
+                        _showClearBrowsingData();
+                      },
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.search),
+                      title:
+                          Text('Search engine: ${settings.searchEngineName}'),
+                      subtitle:
+                          const Text('Change the start page and search engine'),
+                      onTap: () => open(const SettingsScreen()),
+                    ),
+                    const Divider(),
+                    SwitchListTile(
+                      secondary: const Icon(Icons.shield_outlined),
+                      value: settings.adBlockEnabled,
+                      title: const Text('Ad blocker'),
+                      subtitle: const Text(
+                          'uBlock Origin and EasyList filters for ads, trackers and junk elements.'),
+                      onChanged: (value) async {
+                        await settings.setAdBlockEnabled(value);
+                        _syncAdBlockState(value);
+                        setSheetState(() {});
+                      },
+                    ),
+                    SwitchListTile(
+                      secondary: const Icon(Icons.block),
+                      value: settings.blockPopups,
+                      title: const Text('Block pop-ups and redirect ads'),
+                      subtitle:
+                          const Text('Applies to newly opened pages and tabs.'),
+                      onChanged: (value) async {
+                        await settings.setBlockPopups(value);
+                        setSheetState(() {});
+                      },
+                    ),
+                    SwitchListTile(
+                      secondary: const Icon(Icons.open_in_new),
+                      value: settings.redirectPromptEnabled,
+                      title: const Text('Ask before cross-site redirects'),
+                      onChanged: (value) async {
+                        await settings.setRedirectPromptEnabled(value);
+                        setSheetState(() {});
+                      },
+                    ),
+                    SwitchListTile(
+                      secondary: const Icon(Icons.play_circle_outline),
+                      value: settings.onlyPlayingVideo,
+                      title: const Text('Only show the playing video'),
+                      onChanged: (value) async {
+                        await settings.setOnlyPlayingVideo(value);
+                        setSheetState(() {});
+                      },
+                    ),
+                    SwitchListTile(
+                      secondary: const Icon(Icons.filter_alt_outlined),
+                      value: settings.filterJunkMedia,
+                      title: const Text('Filter junk media'),
+                      onChanged: (value) async {
+                        await settings.setFilterJunkMedia(value);
+                        setSheetState(() {});
+                      },
+                    ),
+                    SwitchListTile(
+                      secondary: const Icon(Icons.desktop_windows_outlined),
+                      value: _tab.desktopMode,
+                      title: const Text('Desktop site'),
+                      subtitle:
+                          const Text('Use a desktop user agent and viewport.'),
+                      onChanged: (_) async {
+                        await _toggleDesktopMode();
+                        setSheetState(() {});
+                      },
+                    ),
+                  ],
+                ),
               ),
-            ),
-          );
-        },
+            );
+          },
         ),
       ),
     );
@@ -4027,7 +4035,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.lock_rounded,
+                      Icon(Icons.lock_rounded,
                           size: 15, color: AppColors.forestAccent),
                       const SizedBox(width: 8),
                       Expanded(
@@ -4053,9 +4061,11 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
                           ),
                         ),
                       ),
-                      GestureDetector(
-                        onTap: () => _webController?.reload(),
-                        child: const Icon(Icons.refresh_rounded,
+                      IconButton(
+                        tooltip: 'Reload page',
+                        visualDensity: VisualDensity.compact,
+                        onPressed: () => _webController?.reload(),
+                        icon: const Icon(Icons.refresh_rounded,
                             size: 17, color: AppColors.forestMuted),
                       ),
                     ],
@@ -4155,8 +4165,9 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
           clipBehavior: Clip.none,
           children: [
             Material(
-              color:
-                  highlighted ? const Color(0xFF2A2050) : Colors.transparent,
+              color: highlighted
+                  ? AppAccent.current.accentDark
+                  : Colors.transparent,
               borderRadius: BorderRadius.circular(14),
               child: InkWell(
                 borderRadius: BorderRadius.circular(14),
@@ -4168,7 +4179,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
                     icon,
                     size: 20,
                     color: !enabled
-                        ? const Color(0xFF59617A)
+                        ? AppColors.forestMuted.withValues(alpha: 0.6)
                         : highlighted
                             ? AppColors.forestAccent
                             : AppColors.forestText,
@@ -4184,7 +4195,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
                   padding:
                       const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
                   constraints: const BoxConstraints(minWidth: 15),
-                  decoration: const BoxDecoration(
+                  decoration: BoxDecoration(
                     color: AppColors.primary,
                     shape: BoxShape.circle,
                   ),
@@ -4219,98 +4230,98 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
             children: [
               _browserHeader(context),
               const SizedBox(height: 6),
-            if (_addressFocus.hasFocus && _suggestions.isNotEmpty)
-              Container(
-                margin: const EdgeInsets.symmetric(horizontal: 16),
-                decoration: BoxDecoration(
-                  color: AppColors.forestSurface,
-                  borderRadius: BorderRadius.circular(18),
-                  border: Border.all(color: AppColors.forestBorder),
-                ),
-                clipBehavior: Clip.antiAlias,
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxHeight: 260),
-                  child: ListView(
-                    shrinkWrap: true,
-                    padding: EdgeInsets.zero,
-                    children: [
-                      for (final suggestion in _suggestions)
-                        ListTile(
-                          dense: true,
-                          iconColor: AppColors.forestAccent,
-                          textColor: AppColors.forestText,
-                          leading: Icon(
-                            suggestion.source == 'History'
-                                ? Icons.history_rounded
-                                : suggestion.source == 'Bookmark'
-                                    ? Icons.bookmark_outline_rounded
-                                    : Icons.public_rounded,
-                            color: AppColors.forestAccent,
-                          ),
-                          title: Text(
-                            suggestion.title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: AppText.body(13,
-                                weight: FontWeight.w600,
-                                color: AppColors.forestText),
-                          ),
-                          subtitle: Text(
-                            '${suggestion.source} · ${suggestion.url}',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: AppText.body(11,
-                                color: AppColors.forestMuted),
-                          ),
-                          onTap: () {
-                            _addressController.text = suggestion.url;
-                            _navigate();
-                          },
-                        ),
-                    ],
+              if (_addressFocus.hasFocus && _suggestions.isNotEmpty)
+                Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 16),
+                  decoration: BoxDecoration(
+                    color: AppColors.forestSurface,
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(color: AppColors.forestBorder),
                   ),
-                ),
-              ),
-            if (_error != null)
-              MaterialBanner(
-                key: const ValueKey('linky-browser-error-banner'),
-                content: Text(_error!),
-                actions: [
-                  TextButton(
-                      onPressed: () => setState(() => _error = null),
-                      child: const Text('Dismiss'))
-                ],
-              ),
-            _playingVideos.isEmpty
-                ? const SizedBox.shrink(
-                    key: ValueKey('linky-browser-playing-strip'),
-                  )
-                : _playingVideoStrip(),
-            Expanded(
-              key: const ValueKey('linky-browser-webview-slot'),
-              child: Stack(
-                children: [
-                  Positioned.fill(
-                    child: IndexedStack(
-                      index: _activeIndex,
+                  clipBehavior: Clip.antiAlias,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxHeight: 260),
+                    child: ListView(
+                      shrinkWrap: true,
+                      padding: EdgeInsets.zero,
                       children: [
-                        for (final tab in _tabs) _buildWebView(tab),
+                        for (final suggestion in _suggestions)
+                          ListTile(
+                            dense: true,
+                            iconColor: AppColors.forestAccent,
+                            textColor: AppColors.forestText,
+                            leading: Icon(
+                              suggestion.source == 'History'
+                                  ? Icons.history_rounded
+                                  : suggestion.source == 'Bookmark'
+                                      ? Icons.bookmark_outline_rounded
+                                      : Icons.public_rounded,
+                              color: AppColors.forestAccent,
+                            ),
+                            title: Text(
+                              suggestion.title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: AppText.body(13,
+                                  weight: FontWeight.w600,
+                                  color: AppColors.forestText),
+                            ),
+                            subtitle: Text(
+                              '${suggestion.source} · ${suggestion.url}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: AppText.body(11,
+                                  color: AppColors.forestMuted),
+                            ),
+                            onTap: () {
+                              _addressController.text = suggestion.url;
+                              _navigate();
+                            },
+                          ),
                       ],
                     ),
                   ),
-                  if (_tab.showHome)
+                ),
+              if (_error != null)
+                MaterialBanner(
+                  key: const ValueKey('linky-browser-error-banner'),
+                  content: Text(_error!),
+                  actions: [
+                    TextButton(
+                        onPressed: () => setState(() => _error = null),
+                        child: const Text('Dismiss'))
+                  ],
+                ),
+              _playingVideos.isEmpty
+                  ? const SizedBox.shrink(
+                      key: ValueKey('linky-browser-playing-strip'),
+                    )
+                  : _playingVideoStrip(),
+              Expanded(
+                key: const ValueKey('linky-browser-webview-slot'),
+                child: Stack(
+                  children: [
                     Positioned.fill(
-                      child: BrowserHomePage(
-                        onNavigate: _navigateFromHome,
-                        onOpenUrl: _openUrlFromHome,
+                      child: IndexedStack(
+                        index: _activeIndex,
+                        children: [
+                          for (final tab in _tabs) _buildWebView(tab),
+                        ],
                       ),
                     ),
-                ],
+                    if (_tab.showHome)
+                      Positioned.fill(
+                        child: BrowserHomePage(
+                          onNavigate: _navigateFromHome,
+                          onOpenUrl: _openUrlFromHome,
+                        ),
+                      ),
+                  ],
+                ),
               ),
-            ),
-            _browserToolbar(context),
-          ],
-        ),
+              _browserToolbar(context),
+            ],
+          ),
         ),
       ),
     );

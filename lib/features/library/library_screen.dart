@@ -128,7 +128,35 @@ class _LibraryScreenState extends State<LibraryScreen> {
     );
   }
 
+  Future<bool> _confirm(String title, String message) async {
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(title),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: context.palette.destructive,
+            ),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    return result ?? false;
+  }
+
   Future<void> _delete(File file) async {
+    final name = file.uri.pathSegments.last;
+    final confirmed =
+        await _confirm('Delete file?', '"$name" will be permanently removed.');
+    if (!confirmed || !mounted) return;
     try {
       if (await file.exists()) await file.delete();
       if (!mounted) return;
@@ -261,22 +289,36 @@ class _LibraryScreenState extends State<LibraryScreen> {
     );
   }
 
-  void _deleteSelected() {
+  Future<void> _deleteSelected() async {
     final selected = _selectedPaths
         .map((path) => File(path))
         .where((file) => file.existsSync())
         .toList(growable: false);
-    setState(() {
-      for (final file in selected) {
-        try {
-          file.deleteSync();
-        } catch (_) {}
+    if (selected.isEmpty) return;
+    final confirmed = await _confirm(
+      'Delete ${selected.length} file${selected.length == 1 ? '' : 's'}?',
+      'The selected file${selected.length == 1 ? '' : 's'} will be permanently removed.',
+    );
+    if (!confirmed || !mounted) return;
+    var deleted = 0;
+    var failed = 0;
+    for (final file in selected) {
+      try {
+        await file.delete();
+        deleted++;
+      } catch (_) {
+        failed++;
       }
+    }
+    if (!mounted) return;
+    setState(() {
       _selectedPaths.clear();
       _selecting = false;
       _data = _loadData();
     });
-    _toast('Deleted ${selected.length} file(s)');
+    _toast(failed == 0
+        ? 'Deleted $deleted file${deleted == 1 ? '' : 's'}'
+        : 'Deleted $deleted; $failed could not be removed');
   }
 
   void _toast(String message) {
@@ -417,129 +459,138 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
             return Stack(
               children: [
-                CustomScrollView(
-                  key: const PageStorageKey('library-scroll'),
-                  slivers: [
-                    SliverPadding(
-                      padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
-                      sliver: SliverList(
-                        delegate: SliverChildListDelegate([
-                          Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text('Library',
-                                        style: AppText.display(30,
-                                            color: palette.foreground)),
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      'Your saved media, available offline.',
-                                      style: AppText.body(13,
-                                          color: palette.mutedForeground),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              if (_selecting)
-                                Padding(
-                                  padding: const EdgeInsets.only(right: 8),
-                                  child: RoundIconButton(
-                                    icon: allVisibleSelected
-                                        ? Icons.deselect_rounded
-                                        : Icons.select_all_rounded,
-                                    tooltip: allVisibleSelected
-                                        ? 'Deselect all'
-                                        : 'Select all',
-                                    onPressed:
-                                        files.isEmpty ? null : toggleSelectAll,
+                RefreshIndicator(
+                  onRefresh: () async {
+                    setState(() => _data = _loadData());
+                    await _data;
+                  },
+                  child: CustomScrollView(
+                    key: const PageStorageKey('library-scroll'),
+                    slivers: [
+                      SliverPadding(
+                        padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+                        sliver: SliverList(
+                          delegate: SliverChildListDelegate([
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text('Library',
+                                          style: AppText.display(30,
+                                              color: palette.foreground)),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        'Your saved media, available offline.',
+                                        style: AppText.body(13,
+                                            color: palette.mutedForeground),
+                                      ),
+                                    ],
                                   ),
                                 ),
-                              RoundIconButton(
-                                icon: _selecting
-                                    ? Icons.check_rounded
-                                    : Icons.checklist_rounded,
-                                tooltip: _selecting
-                                    ? 'Done selecting'
-                                    : 'Select files',
-                                filled: _selecting,
-                                onPressed: () => setState(() {
-                                  _selecting = !_selecting;
-                                  if (!_selecting) _selectedPaths.clear();
-                                }),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 16),
-                          _StorageCard(data: data),
-                          const SizedBox(height: 14),
-                          TextField(
-                            controller: _searchController,
-                            textInputAction: TextInputAction.search,
-                            decoration: InputDecoration(
-                              hintText: 'Search your files',
-                              prefixIcon: Icon(
-                                Icons.search_rounded,
-                                color: palette.mutedForeground,
-                                size: 20,
+                                if (_selecting)
+                                  Padding(
+                                    padding: const EdgeInsets.only(right: 8),
+                                    child: RoundIconButton(
+                                      icon: allVisibleSelected
+                                          ? Icons.deselect_rounded
+                                          : Icons.select_all_rounded,
+                                      tooltip: allVisibleSelected
+                                          ? 'Deselect all'
+                                          : 'Select all',
+                                      onPressed: files.isEmpty
+                                          ? null
+                                          : toggleSelectAll,
+                                    ),
+                                  ),
+                                RoundIconButton(
+                                  icon: _selecting
+                                      ? Icons.check_rounded
+                                      : Icons.checklist_rounded,
+                                  tooltip: _selecting
+                                      ? 'Done selecting'
+                                      : 'Select files',
+                                  filled: _selecting,
+                                  onPressed: () => setState(() {
+                                    _selecting = !_selecting;
+                                    if (!_selecting) _selectedPaths.clear();
+                                  }),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 16),
+                            _StorageCard(data: data),
+                            const SizedBox(height: 14),
+                            TextField(
+                              controller: _searchController,
+                              textInputAction: TextInputAction.search,
+                              decoration: InputDecoration(
+                                hintText: 'Search your files',
+                                prefixIcon: Icon(
+                                  Icons.search_rounded,
+                                  color: palette.mutedForeground,
+                                  size: 20,
+                                ),
                               ),
                             ),
-                          ),
-                          const SizedBox(height: 14),
-                          _FilterPills(
-                            data: data,
-                            value: _filter,
-                            onChanged: (value) =>
-                                setState(() => _filter = value),
-                          ),
-                          const SizedBox(height: 14),
-                        ]),
-                      ),
-                    ),
-                    if (loading)
-                      const SliverToBoxAdapter(
-                        child: Padding(
-                          padding: EdgeInsets.symmetric(vertical: 48),
-                          child: Center(child: CircularProgressIndicator()),
-                        ),
-                      )
-                    else if (files.isEmpty)
-                      SliverPadding(
-                        padding: const EdgeInsets.symmetric(horizontal: 20),
-                        sliver: SliverToBoxAdapter(
-                          child: _empty(query.isNotEmpty),
-                        ),
-                      )
-                    else
-                      SliverPadding(
-                        padding: const EdgeInsets.symmetric(horizontal: 20),
-                        sliver: SliverList.builder(
-                          itemCount: files.length + 1,
-                          itemBuilder: (context, index) {
-                            if (index == 0) {
-                              return Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    '${files.length} file${files.length == 1 ? '' : 's'}',
-                                    style: AppText.label(11,
-                                        color: palette.mutedForeground),
-                                  ),
-                                  const SizedBox(height: 10),
-                                ],
-                              );
-                            }
-                            final file = files[index - 1];
-                            return _fileCard(file, data.sizeByPath[file.path]);
-                          },
+                            const SizedBox(height: 14),
+                            _FilterPills(
+                              data: data,
+                              value: _filter,
+                              onChanged: (value) =>
+                                  setState(() => _filter = value),
+                            ),
+                            const SizedBox(height: 14),
+                          ]),
                         ),
                       ),
-                    SliverToBoxAdapter(
-                      child: SizedBox(height: _selecting ? 120 : 32),
-                    ),
-                  ],
+                      if (loading)
+                        const SliverToBoxAdapter(
+                          child: Padding(
+                            padding: EdgeInsets.symmetric(vertical: 48),
+                            child: Center(child: CircularProgressIndicator()),
+                          ),
+                        )
+                      else if (files.isEmpty)
+                        SliverPadding(
+                          padding: const EdgeInsets.symmetric(horizontal: 20),
+                          sliver: SliverToBoxAdapter(
+                            child: _empty(query.isNotEmpty),
+                          ),
+                        )
+                      else
+                        SliverPadding(
+                          padding: const EdgeInsets.symmetric(horizontal: 20),
+                          sliver: SliverList.builder(
+                            itemCount: files.length + 1,
+                            itemBuilder: (context, index) {
+                              if (index == 0) {
+                                return Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      '${files.length} file${files.length == 1 ? '' : 's'}',
+                                      style: AppText.label(11,
+                                          color: palette.mutedForeground),
+                                    ),
+                                    const SizedBox(height: 10),
+                                  ],
+                                );
+                              }
+                              final file = files[index - 1];
+                              return _fileCard(
+                                  file, data.sizeByPath[file.path]);
+                            },
+                          ),
+                        ),
+                      SliverToBoxAdapter(
+                        child: SizedBox(height: _selecting ? 120 : 32),
+                      ),
+                    ],
+                  ),
                 ),
                 if (_selecting)
                   Positioned(
@@ -602,25 +653,27 @@ class _LibraryScreenState extends State<LibraryScreen> {
         child: Row(
           children: [
             GestureDetector(
-              onTap: () => _toggleSelect(file),
+              onTap: _selecting ? () => _toggleSelect(file) : null,
               behavior: HitTestBehavior.opaque,
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 150),
-                width: 22,
-                height: 22,
-                margin: const EdgeInsets.only(right: 10),
-                decoration: BoxDecoration(
-                  color: selected ? AppColors.primary : Colors.transparent,
-                  borderRadius: BorderRadius.circular(7),
-                  border: Border.all(
-                    color: selected ? AppColors.primary : palette.border,
-                    width: 1.6,
+              child: Padding(
+                padding: const EdgeInsets.only(top: 12, bottom: 12, right: 10),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 150),
+                  width: 22,
+                  height: 22,
+                  decoration: BoxDecoration(
+                    color: selected ? AppColors.primary : Colors.transparent,
+                    borderRadius: BorderRadius.circular(7),
+                    border: Border.all(
+                      color: selected ? AppColors.primary : palette.border,
+                      width: 1.6,
+                    ),
                   ),
+                  child: selected
+                      ? const Icon(Icons.check_rounded,
+                          size: 14, color: Colors.white)
+                      : null,
                 ),
-                child: selected
-                    ? const Icon(Icons.check_rounded,
-                        size: 14, color: Colors.white)
-                    : null,
               ),
             ),
             MediaThumbnail(
@@ -714,8 +767,16 @@ class _StorageCard extends StatelessWidget {
     final hasDevice = data.deviceBytes > 0;
     final segments = <(String, int, Color)>[
       ('video', data.bytesByType['video'] ?? 0, AppColors.primary),
-      ('audio', data.bytesByType['audio'] ?? 0, const Color(0xFF9F7BFF)),
-      ('image', data.bytesByType['image'] ?? 0, const Color(0xFFD6C8FF)),
+      (
+        'audio',
+        data.bytesByType['audio'] ?? 0,
+        AppColors.primary.withValues(alpha: 0.65)
+      ),
+      (
+        'image',
+        data.bytesByType['image'] ?? 0,
+        AppColors.primary.withValues(alpha: 0.35)
+      ),
       ('document', data.bytesByType['document'] ?? 0, AppColors.amber),
     ];
     return AppCard(
@@ -922,7 +983,7 @@ class _SelectionBar extends StatelessWidget {
             height: 28,
             margin: const EdgeInsets.only(left: 4),
             alignment: Alignment.center,
-            decoration: const BoxDecoration(
+            decoration: BoxDecoration(
               color: AppColors.primary,
               shape: BoxShape.circle,
             ),

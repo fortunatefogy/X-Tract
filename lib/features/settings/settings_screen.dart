@@ -84,6 +84,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _clearCookies() async {
+    final confirmed = await _confirmAction(
+      title: 'Clear browser cookies?',
+      message: 'You will be signed out of every site in the Linky browser.',
+      confirm: 'Clear cookies',
+    );
+    if (confirmed != true) return;
     await CookieManager.instance().deleteAllCookies();
     if (!mounted) return;
     _toast('Browser cookies cleared.');
@@ -129,6 +135,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _moveDownloads() async {
+    final confirmed = await _confirmAction(
+      title: 'Move existing downloads?',
+      message: 'Files saved before the location change will be moved to the '
+          'current downloads folder.',
+      confirm: 'Move files',
+    );
+    if (confirmed != true) return;
     try {
       final moved = await StorageService.instance.moveExistingDownloads();
       final target = await StorageService.instance.downloadDirectory();
@@ -221,6 +234,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  Future<bool?> _confirmAction({
+    required String title,
+    required String message,
+    required String confirm,
+  }) =>
+      showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: Text(title),
+          content: Text(message),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: Text(confirm),
+            ),
+          ],
+        ),
+      );
+
   Future<String?> _promptText({
     required String title,
     required String hint,
@@ -305,8 +341,36 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           PillOption(ThemeMode.system, 'System'),
                         ],
                       ),
+                      const SizedBox(height: 14),
+                      Text('Accent color',
+                          style: AppText.body(14, weight: FontWeight.w700)),
+                      const SizedBox(height: 10),
+                      Wrap(
+                        spacing: 18,
+                        runSpacing: 14,
+                        children: [
+                          for (final accent in AppAccent.all)
+                            _AccentSwatch(
+                              accent: accent,
+                              selected: _settings.accentColor == accent.id,
+                              onTap: () => _settings.setAccentColor(accent.id),
+                            ),
+                        ],
+                      ),
                     ],
                   ),
+                ),
+              ],
+            ),
+            _Group(
+              title: 'Security',
+              children: [
+                _SwitchRow(
+                  title: 'Fingerprint lock',
+                  subtitle:
+                      'Ask for your fingerprint or screen lock when opening Linky and after leaving it',
+                  value: _settings.appLockEnabled,
+                  onChanged: _settings.setAppLockEnabled,
                 ),
               ],
             ),
@@ -613,6 +677,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     onChanged: (value) =>
                         AdBlockService.instance.setListEnabled(listUrl, value),
                     onDelete: () async {
+                      final confirmed = await _confirmAction(
+                        title: 'Remove rule list?',
+                        message: 'This list will no longer block ads in the '
+                            'Linky browser.',
+                        confirm: 'Remove',
+                      );
+                      if (confirmed != true) return;
                       await AdBlockService.instance.removeListUrl(listUrl);
                       if (mounted) setState(() {});
                     },
@@ -1044,6 +1115,61 @@ class _ProxyRow extends StatelessWidget {
             onPressed: onRemove,
             icon:
                 Icon(Icons.close_rounded, size: 18, color: palette.destructive),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AccentSwatch extends StatelessWidget {
+  const _AccentSwatch({
+    required this.accent,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final AppAccent accent;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.palette;
+    return InkWell(
+      borderRadius: BorderRadius.circular(999),
+      onTap: onTap,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [accent.heroStart, accent.primaryDeep],
+              ),
+              border: Border.all(
+                color: selected ? palette.foreground : palette.border,
+                width: selected ? 2.4 : 1,
+              ),
+            ),
+            child: selected
+                ? const Icon(Icons.check_rounded,
+                    size: 18, color: AppColors.white)
+                : null,
+          ),
+          const SizedBox(height: 6),
+          Text(
+            accent.name,
+            style: AppText.body(
+              11,
+              weight: selected ? FontWeight.w700 : FontWeight.w500,
+              color: selected ? palette.foreground : palette.mutedForeground,
+            ),
           ),
         ],
       ),
