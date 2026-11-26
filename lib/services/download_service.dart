@@ -361,6 +361,47 @@ class DownloadService extends ChangeNotifier {
     return _records[taskId] ?? record;
   }
 
+  /// Registers a file the browser already wrote to disk (blob/MSE captures)
+  /// so it appears in the Downloads list like a normal completed download.
+  Future<DownloadRecord> registerCapturedFile(
+    File file, {
+    required String title,
+    String type = 'video',
+    String? sourcePage,
+    String? folder,
+  }) async {
+    await init();
+    final cleanFolder = LibraryFolders.normalize(
+      folder ?? SettingsService.instance.downloadFolder,
+    );
+    final taskId =
+        'capture-${DateTime.now().microsecondsSinceEpoch}-'
+        '${_random.nextInt(1 << 20)}';
+    var size = 0;
+    try {
+      size = await file.length();
+    } catch (_) {}
+    final record = DownloadRecord(
+      taskId: taskId,
+      url: file.uri.toString(),
+      filename:
+          file.uri.pathSegments.isEmpty ? file.path : file.uri.pathSegments.last,
+      title: title,
+      type: type,
+      createdAt: DateTime.now(),
+      state: DownloadState.complete,
+      progress: 1,
+      expectedBytes: size,
+      filePath: file.path,
+      sourcePage: sourcePage,
+      folder: cleanFolder.isEmpty ? null : cleanFolder,
+    );
+    _records[taskId] = record;
+    _notify(force: true);
+    _schedulePersist();
+    return record;
+  }
+
   Future<void> cancel(DownloadRecord record) async {
     final id = record.taskId;
     _pending.remove(id);

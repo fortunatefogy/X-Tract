@@ -102,7 +102,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           _loaded.contains(1)
               ? const DownloadsScreen()
               : const SizedBox.shrink(),
-          _loaded.contains(2) ? const LibraryScreen() : const SizedBox.shrink(),
+          _loaded.contains(2)
+              ? LibraryScreen(isActive: _index == _libraryTab)
+              : const SizedBox.shrink(),
           _loaded.contains(3)
               ? const SettingsScreen()
               : const SizedBox.shrink(),

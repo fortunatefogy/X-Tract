@@ -70,10 +70,25 @@ class _HomeScreenState extends State<HomeScreen> {
   void _openBrowser() {
     final urls = _extractUrls(_urlController.text);
     Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => MediaBrowserScreen(
-          initialUrl: urls.isEmpty ? '' : urls.first,
-        ),
+      PageRouteBuilder<void>(
+        transitionDuration: const Duration(milliseconds: 240),
+        reverseTransitionDuration: const Duration(milliseconds: 200),
+        pageBuilder: (context, animation, secondaryAnimation) =>
+            MediaBrowserScreen(initialUrl: urls.isEmpty ? '' : urls.first),
+        transitionsBuilder: (context, animation, secondaryAnimation, child) {
+          final curved = CurvedAnimation(
+            parent: animation,
+            curve: Curves.easeOutCubic,
+            reverseCurve: Curves.easeInCubic,
+          );
+          return SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(0, 0.06),
+              end: Offset.zero,
+            ).animate(curved),
+            child: child,
+          );
+        },
       ),
     );
   }

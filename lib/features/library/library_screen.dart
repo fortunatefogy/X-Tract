@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -18,7 +19,11 @@ import 'folder_picker.dart';
 import 'library_media_viewer.dart';
 
 class LibraryScreen extends StatefulWidget {
-  const LibraryScreen({super.key});
+  const LibraryScreen({super.key, this.isActive = true});
+
+  /// Whether this is the visible shell tab. Hardware back must only navigate
+  /// folder history while the Library tab is on screen.
+  final bool isActive;
 
   @override
   State<LibraryScreen> createState() => _LibraryScreenState();
@@ -42,6 +47,16 @@ class _LibraryData {
   final Map<String, int> sizeByPath;
   final int freeBytes;
   final int deviceBytes;
+
+  _LibraryData copyWith({List<LibraryFolder>? folders}) => _LibraryData(
+        files: files,
+        folders: folders ?? this.folders,
+        totalBytes: totalBytes,
+        bytesByType: bytesByType,
+        sizeByPath: sizeByPath,
+        freeBytes: freeBytes,
+        deviceBytes: deviceBytes,
+      );
 }
 
 class _LibraryScreenState extends State<LibraryScreen> {
@@ -53,6 +68,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
   String _filter = 'all';
   String _folder = '';
   String _completedSignature = '';
+  _LibraryData? _lastLoaded;
+  String? _lastLoadedFolder;
   bool _locked = false;
   bool _authenticating = false;
   String? _authError;
@@ -63,6 +80,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
     _data = _loadData();
     DownloadService.instance.addListener(_onDownloadsChanged);
     SettingsService.instance.addListener(_onSettingsChanged);
+    LibraryFolders.instance.addListener(_onFoldersChanged);
     LibraryLockController.instance.addListener(_onLockRequested);
     _searchController.addListener(() => setState(() {}));
     if (SettingsService.instance.libraryLockEnabled) {
@@ -75,6 +93,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
   void dispose() {
     DownloadService.instance.removeListener(_onDownloadsChanged);
     SettingsService.instance.removeListener(_onSettingsChanged);
+    LibraryFolders.instance.removeListener(_onFoldersChanged);
     LibraryLockController.instance.removeListener(_onLockRequested);
     _searchController.dispose();
     super.dispose();
@@ -94,6 +113,54 @@ class _LibraryScreenState extends State<LibraryScreen> {
       setState(() => _locked = false);
     } else {
       setState(() {});
+    }
+  }
+
+  void _onFoldersChanged() {
+    if (!mounted) return;
+    _reloadSoon();
+  }
+
+  void _reloadSoon() {
+    _reload();
+    Future<void>.delayed(const Duration(milliseconds: 180), () {
+      if (mounted) _reload();
+    });
+  }
+
+  void _addFolderLocally(LibraryFolder folder) {
+    final current = _lastLoaded;
+    if (!mounted || current == null || _lastLoadedFolder != _folder) return;
+    final folders = [
+      ...current.folders.where(
+        (entry) => entry.relativePath != folder.relativePath,
+      ),
+      folder,
+    ]..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    setState(() {
+      _lastLoaded = current.copyWith(folders: folders);
+      _data = Future.value(_lastLoaded);
+    });
+  }
+
+  void _removeFolderLocally(String relativePath) {
+    final current = _lastLoaded;
+    if (!mounted || current == null || _lastLoadedFolder != _folder) return;
+    final folders = current.folders
+        .where((entry) => entry.relativePath != relativePath)
+        .toList(growable: false);
+    if (folders.length == current.folders.length) return;
+    setState(() {
+      _lastLoaded = current.copyWith(folders: folders);
+      _data = Future.value(_lastLoaded);
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant LibraryScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.isActive && !oldWidget.isActive) {
+      _reload();
     }
   }
 
@@ -147,9 +214,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
     });
   }
 
-  Future<_LibraryData> _loadData() async {
-    final directory = await LibraryFolders.instance.directoryFor(_folder);
-    final folders = await LibraryFolders.instance.children(_folder);
+  Future<_LibraryData> _loadData([String? folder]) async {
+    final target = folder ?? _folder;
+    final directory = await LibraryFolders.instance.directoryFor(target);
+    final folders = await LibraryFolders.instance.children(target);
     final files = <File>[];
     if (await directory.exists()) {
       try {
@@ -403,19 +471,38 @@ class _LibraryScreenState extends State<LibraryScreen> {
         .showSnackBar(SnackBar(content: Text(message)));
   }
 
-  void _reload() => setState(() => _data = _loadData());
+  void _reload() {
+    setState(() {
+      _data = _loadData();
+    });
+  }
+
+  static const _folderTapGap = Duration(milliseconds: 400);
+  DateTime? _lastFolderNavigationAt;
+
+  bool _acceptFolderNavigation() {
+    final now = DateTime.now();
+    final last = _lastFolderNavigationAt;
+    if (last != null && now.difference(last) < _folderTapGap) return false;
+    _lastFolderNavigationAt = now;
+    return true;
+  }
 
   void _openFolder(LibraryFolder folder) {
+    if (folder.relativePath == _folder || !_acceptFolderNavigation()) return;
     setState(() {
       _folder = folder.relativePath;
       _filter = 'all';
       _selectedPaths.clear();
       _selecting = false;
-      _data = _loadData();
+      _lastLoaded = null;
+      _lastLoadedFolder = null;
+      _data = _loadData(folder.relativePath);
     });
   }
 
   void _goUp() {
+    if (_folder.isEmpty || !_acceptFolderNavigation()) return;
     final parent = _folder.contains('/')
         ? _folder.substring(0, _folder.lastIndexOf('/'))
         : '';
@@ -424,7 +511,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
       _filter = 'all';
       _selectedPaths.clear();
       _selecting = false;
-      _data = _loadData();
+      _lastLoaded = null;
+      _lastLoadedFolder = null;
+      _data = _loadData(parent);
     });
   }
 
@@ -458,7 +547,15 @@ class _LibraryScreenState extends State<LibraryScreen> {
     try {
       await LibraryFolders.instance.create(name, parent: _folder);
       if (!mounted) return;
-      _reload();
+      final safe = LibraryFolders.sanitize(name);
+      final path = _folder.isEmpty ? safe : '$_folder/$safe';
+      _addFolderLocally(
+        LibraryFolder(
+          relativePath: path,
+          name: safe,
+          depth: path.split('/').length,
+        ),
+      );
       _toast('Folder created');
     } on FileSystemException catch (error) {
       _toast('Could not create folder: ${error.message}');
@@ -495,7 +592,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
     try {
       await LibraryFolders.instance.rename(folder, name);
       if (!mounted) return;
-      _reload();
       _toast('Folder renamed');
     } on FileSystemException catch (error) {
       _toast('Could not rename folder: ${error.message}');
@@ -503,7 +599,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }
 
   Future<void> _deleteFolder(LibraryFolder folder) async {
-    final empty = await LibraryFolders.instance.isEmpty(folder);
+    var empty = false;
+    try {
+      empty = await LibraryFolders.instance.isEmpty(folder);
+    } catch (_) {}
     if (!mounted) return;
     final confirmed = await _confirm(
       'Delete folder?',
@@ -513,14 +612,50 @@ class _LibraryScreenState extends State<LibraryScreen> {
               'removed.',
     );
     if (confirmed != true || !mounted) return;
+    final settings = SettingsService.instance;
+    final selected = settings.downloadFolder;
+    final wasSelected = selected == folder.relativePath ||
+        selected.startsWith('${folder.relativePath}/');
+    final wasCurrent = _folder == folder.relativePath ||
+        _folder.startsWith('${folder.relativePath}/');
+    if (wasCurrent) {
+      // Leave the deleted folder before the next load, otherwise _loadData
+      // would recreate its directory with directoryFor().
+      setState(() {
+        _folder = folder.parent;
+        _filter = 'all';
+        _selectedPaths.clear();
+        _selecting = false;
+        _lastLoaded = null;
+        _lastLoadedFolder = null;
+        _data = _loadData(folder.parent);
+      });
+    }
     try {
       await LibraryFolders.instance.delete(folder);
+      if (wasSelected) await settings.setDownloadFolder('');
       if (!mounted) return;
-      _reload();
+      if (!wasCurrent) _removeFolderLocally(folder.relativePath);
       _toast('Folder deleted');
     } on FileSystemException catch (error) {
       _toast('Could not delete folder: ${error.message}');
+    } catch (error) {
+      _toast('Could not delete folder: $error');
+    } finally {
+      if (mounted) _reload();
     }
+  }
+
+  Future<void> _deleteCurrentFolder() async {
+    if (_folder.isEmpty) return;
+    final segments = _folder.split('/');
+    await _deleteFolder(
+      LibraryFolder(
+        relativePath: _folder,
+        name: segments.last,
+        depth: segments.length,
+      ),
+    );
   }
 
   Future<void> _folderOptions(LibraryFolder folder) async {
@@ -706,254 +841,294 @@ class _LibraryScreenState extends State<LibraryScreen> {
     if (_locked && SettingsService.instance.libraryLockEnabled) {
       return _lockedView(context);
     }
-    return Scaffold(
-      body: SafeArea(
-        bottom: false,
-        child: FutureBuilder<_LibraryData>(
-          future: _data,
-          builder: (context, snapshot) {
-            final loading = snapshot.connectionState != ConnectionState.done;
-            final data = snapshot.data ??
-                const _LibraryData(
-                  files: [],
-                  folders: [],
-                  totalBytes: 0,
-                  bytesByType: {},
-                  sizeByPath: {},
-                  freeBytes: 0,
-                  deviceBytes: 0,
-                );
-            final query = _searchController.text.trim().toLowerCase();
-            final files = data.files.where((file) {
-              final name = file.uri.pathSegments.last.toLowerCase();
-              if (query.isNotEmpty && !name.contains(query)) return false;
-              if (_filter != 'all' && _category(name) != _filter) {
-                return false;
+    return PopScope(
+      canPop: !widget.isActive || (_folder.isEmpty && !_selecting),
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop || !widget.isActive) return;
+        if (_selecting) {
+          setState(() {
+            _selecting = false;
+            _selectedPaths.clear();
+          });
+          return;
+        }
+        if (_folder.isNotEmpty) _goUp();
+      },
+      child: Scaffold(
+        body: SafeArea(
+          bottom: false,
+          child: FutureBuilder<_LibraryData>(
+            future: _data,
+            builder: (context, snapshot) {
+              final loading = snapshot.connectionState != ConnectionState.done;
+              const empty = _LibraryData(
+                files: [],
+                folders: [],
+                totalBytes: 0,
+                bytesByType: {},
+                sizeByPath: {},
+                freeBytes: 0,
+                deviceBytes: 0,
+              );
+              if (!loading && snapshot.data != null) {
+                _lastLoaded = snapshot.data;
+                _lastLoadedFolder = _folder;
               }
-              return true;
-            }).toList(growable: false);
-            final selectedBytes = _selectedPaths.fold<int>(
-              0,
-              (sum, path) => sum + (data.sizeByPath[path] ?? 0),
-            );
-            final allVisibleSelected = files.isNotEmpty &&
-                files.every((file) => _selectedPaths.contains(file.path));
-            void toggleSelectAll() {
-              if (files.isEmpty) return;
-              setState(() {
-                _selecting = true;
-                if (allVisibleSelected) {
-                  for (final file in files) {
-                    _selectedPaths.remove(file.path);
-                  }
-                  if (_selectedPaths.isEmpty) _selecting = false;
-                } else {
-                  _selectedPaths.addAll(files.map((file) => file.path));
+              // While a newly opened folder is loading, never show the
+              // previous folder's data; only reuse the cache for reloads of
+              // the same folder.
+              final data = !loading && snapshot.data != null
+                  ? snapshot.data!
+                  : (_lastLoadedFolder == _folder && _lastLoaded != null
+                      ? _lastLoaded!
+                      : empty);
+              final query = _searchController.text.trim().toLowerCase();
+              final files = data.files.where((file) {
+                final name = file.uri.pathSegments.last.toLowerCase();
+                if (query.isNotEmpty && !name.contains(query)) return false;
+                if (_filter != 'all' && _category(name) != _filter) {
+                  return false;
                 }
-              });
-            }
+                return true;
+              }).toList(growable: false);
+              final selectedBytes = _selectedPaths.fold<int>(
+                0,
+                (sum, path) => sum + (data.sizeByPath[path] ?? 0),
+              );
+              final allVisibleSelected = files.isNotEmpty &&
+                  files.every((file) => _selectedPaths.contains(file.path));
+              void toggleSelectAll() {
+                if (files.isEmpty) return;
+                setState(() {
+                  _selecting = true;
+                  if (allVisibleSelected) {
+                    for (final file in files) {
+                      _selectedPaths.remove(file.path);
+                    }
+                    if (_selectedPaths.isEmpty) _selecting = false;
+                  } else {
+                    _selectedPaths.addAll(files.map((file) => file.path));
+                  }
+                });
+              }
 
-            return Stack(
-              children: [
-                RefreshIndicator(
-                  onRefresh: () async {
-                    setState(() => _data = _loadData());
-                    await _data;
-                  },
-                  child: CustomScrollView(
-                    key: const PageStorageKey('library-scroll'),
-                    slivers: [
-                      SliverPadding(
-                        padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
-                        sliver: SliverList(
-                          delegate: SliverChildListDelegate([
-                            Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                if (_folder.isNotEmpty)
-                                  Padding(
-                                    padding: const EdgeInsets.only(
-                                        right: 6, top: 2),
-                                    child: RoundIconButton(
-                                      icon: Icons.arrow_back_rounded,
-                                      tooltip: 'Back',
-                                      onPressed: _goUp,
+              return Stack(
+                children: [
+                  RefreshIndicator(
+                    onRefresh: () async {
+                      setState(() {
+                        _data = _loadData();
+                      });
+                      await _data;
+                    },
+                    child: CustomScrollView(
+                      key: const PageStorageKey('library-scroll'),
+                      slivers: [
+                        SliverPadding(
+                          padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+                          sliver: SliverList(
+                            delegate: SliverChildListDelegate([
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  if (_folder.isNotEmpty)
+                                    Padding(
+                                      padding: const EdgeInsets.only(
+                                          right: 6, top: 2),
+                                      child: RoundIconButton(
+                                        icon: Icons.arrow_back_rounded,
+                                        tooltip: 'Back',
+                                        onPressed: _goUp,
+                                      ),
+                                    ),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text('Library',
+                                            style: AppText.display(30,
+                                                color: palette.foreground)),
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          _folder.isEmpty
+                                              ? 'Your saved media, available offline.'
+                                              : _folder.split('/').join(' / '),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: AppText.body(13,
+                                              color: palette.mutedForeground),
+                                        ),
+                                      ],
                                     ),
                                   ),
-                                Expanded(
-                                  child: Column(
+                                  if (!_selecting && _folder.isNotEmpty)
+                                    Padding(
+                                      padding: const EdgeInsets.only(right: 8),
+                                      child: RoundIconButton(
+                                        icon: Icons.delete_outline_rounded,
+                                        tooltip: 'Delete folder',
+                                        color: palette.destructive,
+                                        onPressed: _deleteCurrentFolder,
+                                      ),
+                                    ),
+                                  if (!_selecting)
+                                    Padding(
+                                      padding: const EdgeInsets.only(right: 8),
+                                      child: RoundIconButton(
+                                        icon: Icons.create_new_folder_outlined,
+                                        tooltip: 'New folder',
+                                        onPressed: _createFolder,
+                                      ),
+                                    ),
+                                  if (_selecting)
+                                    Padding(
+                                      padding: const EdgeInsets.only(right: 8),
+                                      child: RoundIconButton(
+                                        icon: allVisibleSelected
+                                            ? Icons.deselect_rounded
+                                            : Icons.select_all_rounded,
+                                        tooltip: allVisibleSelected
+                                            ? 'Deselect all'
+                                            : 'Select all',
+                                        onPressed: files.isEmpty
+                                            ? null
+                                            : toggleSelectAll,
+                                      ),
+                                    ),
+                                  RoundIconButton(
+                                    icon: _selecting
+                                        ? Icons.check_rounded
+                                        : Icons.checklist_rounded,
+                                    tooltip: _selecting
+                                        ? 'Done selecting'
+                                        : 'Select files',
+                                    filled: _selecting,
+                                    onPressed: () => setState(() {
+                                      _selecting = !_selecting;
+                                      if (!_selecting) _selectedPaths.clear();
+                                    }),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 16),
+                              _StorageCard(data: data),
+                              const SizedBox(height: 14),
+                              TextField(
+                                controller: _searchController,
+                                textInputAction: TextInputAction.search,
+                                decoration: InputDecoration(
+                                  hintText: 'Search your files',
+                                  prefixIcon: Icon(
+                                    Icons.search_rounded,
+                                    color: palette.mutedForeground,
+                                    size: 20,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 14),
+                              _FilterPills(
+                                data: data,
+                                value: _filter,
+                                onChanged: (value) =>
+                                    setState(() => _filter = value),
+                              ),
+                              if (_filter == 'all' &&
+                                  data.folders.isNotEmpty) ...[
+                                const SizedBox(height: 16),
+                                Text('Folders',
+                                    style: AppText.label(11,
+                                        color: palette.mutedForeground)),
+                                const SizedBox(height: 10),
+                                Wrap(
+                                  spacing: 10,
+                                  runSpacing: 10,
+                                  children: [
+                                    for (final folder in data.folders)
+                                      _folderChip(folder),
+                                  ],
+                                ),
+                              ],
+                              const SizedBox(height: 14),
+                            ]),
+                          ),
+                        ),
+                        if (loading)
+                          const SliverToBoxAdapter(
+                            child: Padding(
+                              padding: EdgeInsets.symmetric(vertical: 48),
+                              child: Center(child: CircularProgressIndicator()),
+                            ),
+                          )
+                        else if (files.isEmpty &&
+                            (_filter != 'all' || data.folders.isEmpty))
+                          SliverPadding(
+                            padding: const EdgeInsets.symmetric(horizontal: 20),
+                            sliver: SliverToBoxAdapter(
+                              child: _empty(query.isNotEmpty),
+                            ),
+                          )
+                        else
+                          SliverPadding(
+                            padding: const EdgeInsets.symmetric(horizontal: 20),
+                            sliver: SliverList.builder(
+                              itemCount: files.length + 1,
+                              itemBuilder: (context, index) {
+                                if (index == 0) {
+                                  return Column(
                                     crossAxisAlignment:
                                         CrossAxisAlignment.start,
                                     children: [
-                                      Text('Library',
-                                          style: AppText.display(30,
-                                              color: palette.foreground)),
-                                      const SizedBox(height: 2),
                                       Text(
-                                        _folder.isEmpty
-                                            ? 'Your saved media, available offline.'
-                                            : _folder.split('/').join(' / '),
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: AppText.body(13,
+                                        '${files.length} file${files.length == 1 ? '' : 's'}',
+                                        style: AppText.label(11,
                                             color: palette.mutedForeground),
                                       ),
+                                      const SizedBox(height: 10),
                                     ],
-                                  ),
-                                ),
-                                if (!_selecting)
-                                  Padding(
-                                    padding: const EdgeInsets.only(right: 8),
-                                    child: RoundIconButton(
-                                      icon: Icons.create_new_folder_outlined,
-                                      tooltip: 'New folder',
-                                      onPressed: _createFolder,
-                                    ),
-                                  ),
-                                if (_selecting)
-                                  Padding(
-                                    padding: const EdgeInsets.only(right: 8),
-                                    child: RoundIconButton(
-                                      icon: allVisibleSelected
-                                          ? Icons.deselect_rounded
-                                          : Icons.select_all_rounded,
-                                      tooltip: allVisibleSelected
-                                          ? 'Deselect all'
-                                          : 'Select all',
-                                      onPressed: files.isEmpty
-                                          ? null
-                                          : toggleSelectAll,
-                                    ),
-                                  ),
-                                RoundIconButton(
-                                  icon: _selecting
-                                      ? Icons.check_rounded
-                                      : Icons.checklist_rounded,
-                                  tooltip: _selecting
-                                      ? 'Done selecting'
-                                      : 'Select files',
-                                  filled: _selecting,
-                                  onPressed: () => setState(() {
-                                    _selecting = !_selecting;
-                                    if (!_selecting) _selectedPaths.clear();
-                                  }),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 16),
-                            _StorageCard(data: data),
-                            const SizedBox(height: 14),
-                            TextField(
-                              controller: _searchController,
-                              textInputAction: TextInputAction.search,
-                              decoration: InputDecoration(
-                                hintText: 'Search your files',
-                                prefixIcon: Icon(
-                                  Icons.search_rounded,
-                                  color: palette.mutedForeground,
-                                  size: 20,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(height: 14),
-                            _FilterPills(
-                              data: data,
-                              value: _filter,
-                              onChanged: (value) =>
-                                  setState(() => _filter = value),
-                            ),
-                            if (_filter == 'all' && data.folders.isNotEmpty) ...[
-                              const SizedBox(height: 16),
-                              Text('Folders',
-                                  style: AppText.label(11,
-                                      color: palette.mutedForeground)),
-                              const SizedBox(height: 10),
-                              Wrap(
-                                spacing: 10,
-                                runSpacing: 10,
-                                children: [
-                                  for (final folder in data.folders)
-                                    _folderChip(folder),
-                                ],
-                              ),
-                            ],
-                            const SizedBox(height: 14),
-                          ]),
-                        ),
-                      ),
-                      if (loading)
-                        const SliverToBoxAdapter(
-                          child: Padding(
-                            padding: EdgeInsets.symmetric(vertical: 48),
-                            child: Center(child: CircularProgressIndicator()),
-                          ),
-                        )
-                      else if (files.isEmpty &&
-                          (_filter != 'all' || data.folders.isEmpty))
-                        SliverPadding(
-                          padding: const EdgeInsets.symmetric(horizontal: 20),
-                          sliver: SliverToBoxAdapter(
-                            child: _empty(query.isNotEmpty),
-                          ),
-                        )
-                      else
-                        SliverPadding(
-                          padding: const EdgeInsets.symmetric(horizontal: 20),
-                          sliver: SliverList.builder(
-                            itemCount: files.length + 1,
-                            itemBuilder: (context, index) {
-                              if (index == 0) {
-                                return Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      '${files.length} file${files.length == 1 ? '' : 's'}',
-                                      style: AppText.label(11,
-                                          color: palette.mutedForeground),
-                                    ),
-                                    const SizedBox(height: 10),
-                                  ],
+                                  );
+                                }
+                                final file = files[index - 1];
+                                return _fileCard(
+                                  file,
+                                  data.sizeByPath[file.path],
+                                  files,
+                                  index - 1,
                                 );
-                              }
-                              final file = files[index - 1];
-                              return _fileCard(
-                                file,
-                                data.sizeByPath[file.path],
-                                files,
-                                index - 1,
-                              );
-                            },
+                              },
+                            ),
                           ),
+                        SliverToBoxAdapter(
+                          child: SizedBox(height: _selecting ? 120 : 32),
                         ),
-                      SliverToBoxAdapter(
-                        child: SizedBox(height: _selecting ? 120 : 32),
-                      ),
-                    ],
-                  ),
-                ),
-                if (_selecting)
-                  Positioned(
-                    left: 20,
-                    right: 20,
-                    bottom: 16,
-                    child: _SelectionBar(
-                      count: _selectedPaths.length,
-                      sizeLabel: selectedBytes > 0
-                          ? _formatBytes(selectedBytes)
-                          : null,
-                      allSelected: allVisibleSelected,
-                      onSelectAll: files.isEmpty ? null : toggleSelectAll,
-                      onSave: _selectedPaths.isEmpty
-                          ? null
-                          : _saveSelectedToGallery,
-                       onShare: _selectedPaths.isEmpty ? null : _shareSelected,
-                       onMove: _selectedPaths.isEmpty ? null : _moveSelected,
-                       onDelete: _selectedPaths.isEmpty ? null : _deleteSelected,
+                      ],
                     ),
                   ),
-              ],
-            );
-          },
+                  if (_selecting)
+                    Positioned(
+                      left: 20,
+                      right: 20,
+                      bottom: 16,
+                      child: _SelectionBar(
+                        count: _selectedPaths.length,
+                        sizeLabel: selectedBytes > 0
+                            ? _formatBytes(selectedBytes)
+                            : null,
+                        allSelected: allVisibleSelected,
+                        onSelectAll: files.isEmpty ? null : toggleSelectAll,
+                        onSave: _selectedPaths.isEmpty
+                            ? null
+                            : _saveSelectedToGallery,
+                        onShare: _selectedPaths.isEmpty ? null : _shareSelected,
+                        onMove: _selectedPaths.isEmpty ? null : _moveSelected,
+                        onDelete:
+                            _selectedPaths.isEmpty ? null : _deleteSelected,
+                      ),
+                    ),
+                ],
+              );
+            },
+          ),
         ),
       ),
     );
@@ -961,36 +1136,55 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
   Widget _folderChip(LibraryFolder folder) {
     final palette = context.palette;
-    return GestureDetector(
-      onTap: () => _openFolder(folder),
-      onLongPress: () => _folderOptions(folder),
-      child: Container(
-        width: 150,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-        decoration: BoxDecoration(
-          color: palette.card,
+    return SizedBox(
+      width: 150,
+      child: Material(
+        color: palette.card,
+        shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppRadius.card),
-          border: Border.all(color: palette.border),
+          side: BorderSide(color: palette.border),
         ),
+        clipBehavior: Clip.antiAlias,
         child: Row(
           children: [
-            Icon(Icons.folder_rounded, size: 22, color: AppColors.primary),
-            const SizedBox(width: 8),
             Expanded(
-              child: Text(
-                folder.name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: AppText.body(12, weight: FontWeight.w700),
+              child: InkWell(
+                onTap: () => _openFolder(folder),
+                onLongPress: () => _folderOptions(folder),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 12, 4, 12),
+                  child: Row(
+                    children: [
+                      Icon(Icons.folder_rounded,
+                          size: 22, color: AppColors.primary),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          folder.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppText.body(12, weight: FontWeight.w700),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ),
             ),
-            GestureDetector(
-              onTap: () => _folderOptions(folder),
-              behavior: HitTestBehavior.opaque,
-              child: Padding(
-                padding: const EdgeInsets.only(left: 4),
-                child: Icon(Icons.more_vert_rounded,
-                    size: 16, color: palette.mutedForeground),
+            Padding(
+              padding: const EdgeInsets.only(right: 4),
+              child: IconButton(
+                tooltip: 'Folder options',
+                visualDensity: VisualDensity.compact,
+                constraints:
+                    const BoxConstraints.tightFor(width: 40, height: 40),
+                padding: EdgeInsets.zero,
+                onPressed: () => _folderOptions(folder),
+                icon: Icon(
+                  Icons.more_vert_rounded,
+                  size: 18,
+                  color: palette.mutedForeground,
+                ),
               ),
             ),
           ],
@@ -1031,8 +1225,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
         onTap: _selecting
             ? () => _toggleSelect(file)
             : () => _openViewer(files, position),
-        onLongPress:
-            _selecting ? null : () => _toggleSelect(file),
+        onLongPress: _selecting ? null : () => _toggleSelect(file),
         child: Row(
           children: [
             if (_selecting)

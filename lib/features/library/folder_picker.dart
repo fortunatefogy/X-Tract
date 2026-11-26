@@ -6,8 +6,116 @@ import '../../theme/app_theme.dart';
 
 /// Shows the folder downloads will be saved to and lets the user change it.
 /// Used inside download sheets so the destination is visible before saving.
-class FolderSelector extends StatelessWidget {
+class FolderSelector extends StatefulWidget {
   const FolderSelector({super.key});
+
+  @override
+  State<FolderSelector> createState() => _FolderSelectorState();
+}
+
+class _FolderSelectorState extends State<FolderSelector> {
+  static const _createValue = '\u0000new-folder';
+
+  List<LibraryFolder> _folders = const [];
+
+  @override
+  void initState() {
+    super.initState();
+    LibraryFolders.instance.addListener(_load);
+    _load();
+  }
+
+  @override
+  void dispose() {
+    LibraryFolders.instance.removeListener(_load);
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    List<LibraryFolder> folders = const [];
+    try {
+      folders = await LibraryFolders.instance.all();
+    } catch (_) {}
+    if (!mounted) return;
+    setState(() => _folders = folders);
+  }
+
+  Future<void> _select(String value, String current) async {
+    if (value == _createValue) {
+      await _createFolder(current);
+      return;
+    }
+    await SettingsService.instance.setDownloadFolder(value);
+  }
+
+  Future<void> _createFolder(String parent) async {
+    final controller = TextEditingController();
+    final name = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('New folder'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          textCapitalization: TextCapitalization.sentences,
+          decoration: const InputDecoration(hintText: 'Folder name'),
+          onSubmitted: (value) => Navigator.of(dialogContext).pop(value),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () =>
+                Navigator.of(dialogContext).pop(controller.text.trim()),
+            child: const Text('Create'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    final trimmed = name?.trim() ?? '';
+    if (trimmed.isEmpty || !mounted) return;
+    await LibraryFolders.instance.create(trimmed, parent: parent);
+    final safe = LibraryFolders.sanitize(trimmed);
+    final path = parent.isEmpty ? safe : '$parent/$safe';
+    await SettingsService.instance.setDownloadFolder(path);
+    await _load();
+  }
+
+  Widget _option(
+    AppPalette palette, {
+    required String label,
+    required bool active,
+    IconData icon = Icons.folder_rounded,
+    double indent = 0,
+  }) {
+    return Row(
+      children: [
+        Icon(
+          icon,
+          size: 17,
+          color: active ? AppColors.primary : palette.mutedForeground,
+        ),
+        SizedBox(width: 8 + indent),
+        Expanded(
+          child: Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: AppText.body(
+              13,
+              weight: active ? FontWeight.w700 : FontWeight.w500,
+              color: palette.foreground,
+            ),
+          ),
+        ),
+        if (active)
+          Icon(Icons.check_rounded, size: 17, color: AppColors.primary),
+      ],
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -17,29 +125,70 @@ class FolderSelector extends StatelessWidget {
         final palette = context.palette;
         final folder = SettingsService.instance.downloadFolder;
         final label = folder.isEmpty ? 'Library (root)' : folder;
-        return InkWell(
-          borderRadius: BorderRadius.circular(AppRadius.pill),
-          onTap: () async {
-            final picked = await showFolderPicker(context, selected: folder);
-            if (picked != null) {
-              await SettingsService.instance.setDownloadFolder(picked);
-            }
-          },
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+        return PopupMenuButton<String>(
+          tooltip: 'Choose download folder',
+          position: PopupMenuPosition.under,
+          initialValue: folder,
+          onOpened: _load,
+          onSelected: (value) => _select(value, folder),
+          itemBuilder: (menuContext) => [
+            PopupMenuItem<String>(
+              value: '',
+              height: 44,
+              child: _option(
+                palette,
+                label: 'Library (root)',
+                active: folder.isEmpty,
+                icon: Icons.folder_outlined,
+              ),
+            ),
+            for (final item in _folders)
+              PopupMenuItem<String>(
+                value: item.relativePath,
+                height: 44,
+                child: _option(
+                  palette,
+                  label: item.name,
+                  active: item.relativePath == folder,
+                  indent: (item.depth - 1) * 14.0,
+                ),
+              ),
+            const PopupMenuDivider(),
+            PopupMenuItem<String>(
+              value: _createValue,
+              height: 44,
+              child: _option(
+                palette,
+                label: 'New folder',
+                active: false,
+                icon: Icons.create_new_folder_outlined,
+              ),
+            ),
+          ],
+          child: Container(
+            height: 44,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            decoration: BoxDecoration(
+              color: palette.input,
+              borderRadius: BorderRadius.circular(AppRadius.small),
+              border: Border.all(color: palette.border),
+            ),
             child: Row(
               children: [
-                Icon(Icons.folder_outlined,
-                    size: 17, color: AppColors.primary),
+                Icon(Icons.folder_outlined, size: 17, color: AppColors.primary),
                 const SizedBox(width: 8),
+                Text(
+                  'Save to',
+                  style: AppText.body(12, color: palette.mutedForeground),
+                ),
+                const SizedBox(width: 6),
                 Expanded(
                   child: Text(
-                    'Save to: $label',
+                    label,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: AppText.body(12,
-                        weight: FontWeight.w600,
-                        color: palette.mutedForeground),
+                        weight: FontWeight.w700, color: palette.foreground),
                   ),
                 ),
                 Icon(Icons.expand_more_rounded,
@@ -169,14 +318,14 @@ class _FolderPickerDialogState extends State<_FolderPickerDialog> {
                       ),
                       child: Text(
                         'No folders yet. Create one below.',
-                        style: AppText.body(12,
-                            color: palette.mutedForeground),
+                        style: AppText.body(12, color: palette.mutedForeground),
                       ),
                     ),
                   const SizedBox(height: 4),
                   TextButton.icon(
                     onPressed: _creating ? null : _createFolder,
-                    icon: const Icon(Icons.create_new_folder_outlined, size: 18),
+                    icon:
+                        const Icon(Icons.create_new_folder_outlined, size: 18),
                     label: const Text('New folder'),
                   ),
                 ],
@@ -217,8 +366,7 @@ class _FolderPickerDialogState extends State<_FolderPickerDialog> {
             weight: active ? FontWeight.w700 : FontWeight.w500),
       ),
       trailing: active
-          ? Icon(Icons.check_circle_rounded,
-              color: AppColors.primary, size: 20)
+          ? Icon(Icons.check_circle_rounded, color: AppColors.primary, size: 20)
           : null,
       onTap: () => setState(() => _selected = value),
     );

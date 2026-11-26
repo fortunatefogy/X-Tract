@@ -49,6 +49,32 @@ class MediaItem {
   final String? qualityLabel;
   final bool requiresExtractor;
 
+  MediaItem withPlaying(bool value) => MediaItem(
+        url: url,
+        type: type,
+        title: title,
+        mimeType: mimeType,
+        thumbnail: thumbnail,
+        sourcePage: sourcePage,
+        size: size,
+        alt: alt,
+        width: width,
+        height: height,
+        foundIn: foundIn,
+        requestHeaders: requestHeaders,
+        isDownloadable: isDownloadable,
+        isPlaying: value,
+        durationSeconds: durationSeconds,
+        uploader: uploader,
+        formatId: formatId,
+        audioFormatId: audioFormatId,
+        audioUrl: audioUrl,
+        audioMimeType: audioMimeType,
+        groupTitle: groupTitle,
+        qualityLabel: qualityLabel,
+        requiresExtractor: requiresExtractor,
+      );
+
   MediaItem withTitle(String value) => MediaItem(
         url: url,
         type: type,

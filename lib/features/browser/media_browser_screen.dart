@@ -4,12 +4,14 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
 import '../../models/media_item.dart';
 import '../../services/adblock_service.dart';
 import '../../services/bookmarks_service.dart';
+import '../../services/browser_session_service.dart';
 import '../../services/challenge_hosts.dart';
 import '../../services/dash_downloader.dart';
 import '../../services/device_resources.dart';
@@ -17,10 +19,11 @@ import '../../services/download_service.dart';
 import '../../services/hls_downloader.dart';
 import '../../services/history_service.dart';
 import '../../services/media_downloader.dart';
+import '../../services/library_folders.dart';
 import '../../services/media_extractor.dart';
+import '../../services/notification_service.dart';
 import '../../services/platform_extractor.dart';
 import '../../services/settings_service.dart';
-import '../../services/shell_navigation.dart';
 import '../../services/storage_service.dart';
 import '../../services/suggestions_service.dart';
 import '../../services/detection_log_service.dart';
@@ -43,7 +46,8 @@ class MediaBrowserScreen extends StatefulWidget {
   State<MediaBrowserScreen> createState() => _MediaBrowserScreenState();
 }
 
-class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
+class _MediaBrowserScreenState extends State<MediaBrowserScreen>
+    with WidgetsBindingObserver {
   static const _desktopUserAgent =
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
       '(KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36';
@@ -260,14 +264,123 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
     } catch (_) {}
   })()''';
 
-  static const _monitorScript = r'''(() => {
+  static const _monitorHooksScript = r'''(() => {
     if (!window.__linkyMediaHooks) {
       window.__linkyMediaHooks = true;
-      const report = (url, type, details) => { try { window.flutter_inappwebview?.callHandler('linkyFoundMedia', JSON.stringify({url, type, ...(details || {})})); } catch (_) {} };
+      const report = (url, type, details) => { try { window.flutter_inappwebview?.callHandler('linkyFoundMedia', JSON.stringify({url, type, page: location.href, ...(details || {})})); } catch (_) {} };
+      const mediaExtRe = /\.(m3u8|m3u|mpd|mp4|m4v|webm|mov|m4s|mp3|m4a|aac|ogg|oga|opus|wav|flac)(?:$|[?#])/i;
+      const mimeForUrl = (path) => {
+        const p = String(path || '').toLowerCase();
+        if (p.endsWith('.m3u8') || p.endsWith('.m3u')) return 'application/vnd.apple.mpegurl';
+        if (p.endsWith('.mpd')) return 'application/dash+xml';
+        if (/\.(mp3|m4a|aac|ogg|oga|opus|wav|flac)$/.test(p)) return 'audio/mpeg';
+        return 'video/mp4';
+      };
+      const reportMediaUrl = (raw, extra) => {
+        try {
+          if (!raw || typeof raw !== 'string' || raw.length > 4096) return;
+          const clean = raw.replace(/\\u0026/gi, '&').replace(/\\\//g, '/').replace(/\\\\/g, '\\');
+          const u = new URL(clean, location.href);
+          if (!/^https?:$/.test(u.protocol) || !mediaExtRe.test(u.pathname)) return;
+          const details = Object.assign({foundIn: 'JSON response'}, extra || {});
+          if (typeof details.thumbnail === 'string') {
+            try { details.thumbnail = new URL(details.thumbnail, location.href).href; } catch (_) { delete details.thumbnail; }
+          }
+          if (details.thumbnail) window.__linkyLastThumbnail = details.thumbnail;
+          report(u.href, mimeForUrl(u.pathname), details);
+        } catch (_) {}
+      };
+      let jsonScans = 0;
+      const scanJson = (text) => {
+        if (!text || typeof text !== 'string' || text.length > 524288) return;
+        let nodes = 0;
+        const visit = (value) => {
+          if (nodes++ > 4000) return;
+          if (Array.isArray(value)) {
+            for (let i = 0; i < value.length && nodes < 4000; i++) visit(value[i]);
+            return;
+          }
+          if (!value || typeof value !== 'object') return;
+          const thumb = typeof value.thumbnail === 'string' ? value.thumbnail
+            : typeof value.poster === 'string' ? value.poster
+            : typeof value.image === 'string' ? value.image : null;
+          const title = typeof value.title === 'string' ? value.title : null;
+          const extra = {};
+          if (thumb) extra.thumbnail = thumb;
+          if (title) extra.title = title;
+          for (const key of Object.keys(value)) {
+            const child = value[key];
+            if (typeof child === 'string') {
+              if (mediaExtRe.test(child) && /^(https?:\/\/|\/)/.test(child)) {
+                reportMediaUrl(child, extra);
+              }
+            } else if (child && typeof child === 'object') {
+              visit(child);
+            }
+          }
+        };
+        try { visit(JSON.parse(text)); } catch (_) {}
+      };
       const originalFetch = window.fetch;
-      window.fetch = async function(...args) { const response = await originalFetch.apply(this, args); const type = response.headers.get('content-type') || ''; if (/video|audio|image|mpegurl|dash\+xml|pdf|msword|officedocument|text\/plain/i.test(type)) report(response.url, type); return response; };
+      window.fetch = async function(...args) {
+        const response = await originalFetch.apply(this, args);
+        try {
+          const type = response.headers.get('content-type') || '';
+          if (/video|audio|image|mpegurl|dash\+xml|pdf|msword|officedocument/i.test(type)) {
+            const length = Number(response.headers.get('content-length')) || 0;
+            report(response.url, type, length > 0 ? {size: length} : undefined);
+          }
+          if (/json/i.test(type) && jsonScans < 30) {
+            const length = Number(response.headers.get('content-length')) || 0;
+            if (!length || length <= 524288) {
+              jsonScans++;
+              response.clone().text().then(scanJson).catch(function () {});
+            }
+          }
+        } catch (_) {}
+        return response;
+      };
       const originalOpen = XMLHttpRequest.prototype.open;
-      XMLHttpRequest.prototype.open = function(method, url, ...rest) { this.__linkyUrl = url; this.addEventListener('load', function() { const type = this.getResponseHeader('content-type') || ''; if (/video|audio|image|mpegurl|dash\+xml|pdf|msword|officedocument|text\/plain/i.test(type)) report(new URL(this.responseURL || this.__linkyUrl, location.href).href, type); }); return originalOpen.call(this, method, url, ...rest); };
+      XMLHttpRequest.prototype.open = function(method, url, ...rest) {
+        this.__linkyUrl = url;
+        this.addEventListener('load', function() {
+          try {
+            const type = this.getResponseHeader('content-type') || '';
+            if (/video|audio|image|mpegurl|dash\+xml|pdf|msword|officedocument/i.test(type)) {
+              const length = Number(this.getResponseHeader('content-length')) || 0;
+              report(new URL(this.responseURL || this.__linkyUrl, location.href).href, type, length > 0 ? {size: length} : undefined);
+            }
+            if (/json/i.test(type) && jsonScans < 30 &&
+                this.responseType !== 'blob' && this.responseType !== 'arraybuffer') {
+              jsonScans++;
+              scanJson(this.responseText);
+            }
+          } catch (_) {}
+        });
+        return originalOpen.call(this, method, url, ...rest);
+      };
+      const sizeFor = (url) => {
+        try {
+          const entries = performance.getEntriesByName(url);
+          const entry = entries[entries.length - 1];
+          const bytes = entry ? Math.round(entry.encodedBodySize || entry.transferSize || 0) : 0;
+          return bytes > 0 ? bytes : null;
+        } catch (_) {
+          return null;
+        }
+      };
+      const posterFor = (element) => {
+        try {
+          if (element.poster) return new URL(element.poster, location.href).href;
+          let node = element;
+          for (let i = 0; i < 4 && node; i++, node = node.parentElement) {
+            const img = node.querySelector ? node.querySelector('img') : null;
+            const src = img && (img.currentSrc || img.src);
+            if (src) return new URL(src, location.href).href;
+          }
+        } catch (_) {}
+        return window.__linkyLastThumbnail || null;
+      };
       const reportMedia = (element) => {
         try {
           if (!element || !element.currentSrc) return;
@@ -277,6 +390,10 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
             isPlaying: !element.paused && !element.ended && element.readyState >= 2,
             foundIn: 'media element',
             durationSeconds: Number.isFinite(element.duration) ? element.duration : null,
+            size: sizeFor(element.currentSrc),
+            thumbnail: posterFor(element),
+            width: Number(element.videoWidth) || null,
+            height: Number(element.videoHeight) || null,
             mseId: (window.__linkyMseUrlIds && window.__linkyMseUrlIds[element.currentSrc]) || null
           });
         } catch (_) {}
@@ -390,6 +507,9 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
         }
       } catch (_) {}
     }
+  })()''';
+
+  static const _monitorScanScript = r'''(() => {
     const found = new Map();
     const add = (url, kind, details = {}) => {
       if (!url || typeof url !== 'string') return;
@@ -428,11 +548,45 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
     const all = selector => roots.flatMap(root => { try { return Array.from(root.querySelectorAll(selector)); } catch (_) { return []; } });
     const addSrcset = (value, kind) => (value || '').split(',').forEach(part => add(part.trim().split(/\s+/)[0], kind));
     const hasPlayingVideo = all('video').some(media => !media.paused && !media.ended && media.readyState >= 2);
+    const sizeByName = Object.create(null);
+    try {
+      performance.getEntriesByType('resource').forEach(entry => {
+        const bytes = Math.round(entry.encodedBodySize || entry.transferSize || 0);
+        if (bytes > 0) sizeByName[entry.name] = bytes;
+      });
+    } catch (_) {}
+    const sizeOf = (url) => {
+      try { return sizeByName[new URL(url, document.baseURI).href] || null; } catch (_) { return null; }
+    };
+    const posterOf = (el) => {
+      try {
+        if (el.poster) return new URL(el.poster, document.baseURI).href;
+        let node = el;
+        for (let i = 0; i < 4 && node; i++, node = node.parentElement) {
+          const img = node.querySelector ? node.querySelector('img') : null;
+          const src = img && (img.currentSrc || img.src);
+          if (src) return new URL(src, document.baseURI).href;
+        }
+      } catch (_) {}
+      return window.__linkyLastThumbnail || null;
+    };
     all('video,audio').forEach(media => {
       const kind = media.tagName.toLowerCase();
       const playing = kind === 'video' && !media.paused && !media.ended && media.readyState >= 2;
-      const details = kind === 'video' ? {isPlaying: playing, foundIn: 'video element', ...(media.poster ? {thumbnail: new URL(media.poster, document.baseURI).href} : {})} : {};
-      add(media.currentSrc || media.src, kind, details);
+      const src = media.currentSrc || media.src;
+      const details = {isPlaying: playing, foundIn: kind === 'video' ? 'video element' : 'audio element'};
+      if (kind === 'video') {
+        const poster = posterOf(media);
+        if (poster) details.thumbnail = poster;
+        const vw = Number(media.videoWidth) || null;
+        const vh = Number(media.videoHeight) || null;
+        if (vw) details.width = vw;
+        if (vh) details.height = vh;
+        if (Number.isFinite(media.duration)) details.durationSeconds = media.duration;
+      }
+      const bytes = sizeOf(src);
+      if (bytes) details.size = bytes;
+      add(src, kind, details);
       media.querySelectorAll('source,track').forEach(source => add(source.src, source.tagName === 'TRACK' ? 'subtitle' : kind));
     });
     all('img,picture source').forEach(el => {
@@ -442,13 +596,21 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
           const height = Number(el.naturalHeight || el.height) || 0;
           const label = String((el.className && el.className.baseVal !== undefined ? el.className.baseVal : el.className) || '') + ' ' + String(el.id || '');
           if (el.offsetParent === null && el.getClientRects().length === 0) return;
-          if (width && height && (width < 200 || height < 200)) return;
-          if (/icon|logo|avatar|emoji|sprite|badge|button/i.test(label)) return;
-          if (el.closest && el.closest('header,nav,footer')) return;
+          if (window.__linkyFilterJunk !== false) {
+            if (width && height && (width < 300 || height < 300)) return;
+            if (/icon|logo|avatar|emoji|sprite|badge|button/i.test(label)) return;
+            if (el.closest && el.closest('header,nav,footer')) return;
+            const rect = el.getBoundingClientRect();
+            if (rect.width > 0 && rect.height > 0 &&
+                (rect.width < 120 || rect.height < 120)) return;
+          }
         }
       } catch (_) {}
+      const src = el.currentSrc || el.src || el.dataset.src || el.dataset.lazySrc || el.dataset.original || el.dataset.originalSrc || el.dataset.actualsrc || el.dataset.url || el.dataset.echo;
       const details = {title: el.title || '', alt: el.alt || '', width: Number(el.naturalWidth || el.width) || null, height: Number(el.naturalHeight || el.height) || null, foundIn: el.srcset ? 'srcset' : el.dataset.src || el.dataset.lazySrc || el.dataset.original ? 'lazy image' : 'img'};
-      add(el.currentSrc || el.src || el.dataset.src || el.dataset.lazySrc || el.dataset.original || el.dataset.originalSrc || el.dataset.actualsrc || el.dataset.url || el.dataset.echo, 'image', details);
+      const imgBytes = sizeOf(src);
+      if (imgBytes) details.size = imgBytes;
+      add(src, 'image', details);
       addSrcset(el.srcset || el.dataset.srcset || el.dataset.lazySrcset, 'image');
     });
     all('iframe').forEach(el => add(el.src, 'embed'));
@@ -506,12 +668,99 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
       });
     });
     performance.getEntriesByType('resource').forEach(entry => {
-      if (/\.(mp4|m4v|webm|mov|3gp|m3u8|mpd|ts|m4s|ism|isml|flv|mkv|avi|ogv|mp3|m4a|aac|ogg|oga|opus|wav|flac|weba|jpg|jpeg|png|webp|gif|avif|heic|bmp|svg|vtt|srt|ttml|ass|ssa|pdf|docx?|xlsx?|pptx?|txt)(?:$|[?#])/i.test(entry.name)) {
-        add(entry.name, entry.initiatorType || 'resource');
+      if (/\.(mp4|m4v|webm|mov|3gp|m3u8|mpd|ts|m4s|ism|isml|flv|mkv|avi|ogv|mp3|m4a|aac|ogg|oga|opus|wav|flac|weba|vtt|srt|ttml|ass|ssa|pdf|docx?|xlsx?|pptx?|txt)(?:$|[?#])/i.test(entry.name)) {
+        const bytes = Math.round(entry.encodedBodySize || entry.transferSize || 0);
+        add(entry.name, entry.initiatorType || 'resource', bytes > 0 ? {size: bytes} : undefined);
       }
     });
     all('video').forEach(v => { if (v.currentSrc?.startsWith('blob:')) add(v.currentSrc, 'blob video'); });
     return Array.from(found.values());
+  })()''';
+
+  static const _quickScanScript = r'''(() => {
+    const out = [];
+    const add = (url, kind, details) => {
+      if (!url || typeof url !== 'string') return;
+      try {
+        const resolved = new URL(url, document.baseURI).href;
+        if (!/^(https?:|blob:)/i.test(resolved)) return;
+        out.push({url: resolved, kind, ...(details || {})});
+      } catch (_) {}
+    };
+    const sizeByName = Object.create(null);
+    try {
+      performance.getEntriesByType('resource').forEach(entry => {
+        const bytes = Math.round(entry.encodedBodySize || entry.transferSize || 0);
+        if (bytes > 0) sizeByName[entry.name] = bytes;
+      });
+    } catch (_) {}
+    const sizeOf = (url) => {
+      try { return sizeByName[new URL(url, document.baseURI).href] || undefined; } catch (_) { return undefined; }
+    };
+    const posterOf = (el) => {
+      try {
+        if (el.poster) return new URL(el.poster, document.baseURI).href;
+        let node = el;
+        for (let i = 0; i < 4 && node; i++, node = node.parentElement) {
+          const img = node.querySelector ? node.querySelector('img') : null;
+          const src = img && (img.currentSrc || img.src);
+          if (src) return new URL(src, document.baseURI).href;
+        }
+      } catch (_) {}
+      return window.__linkyLastThumbnail || null;
+    };
+    try {
+      document.querySelectorAll('video,audio,img').forEach(el => {
+        if (el.tagName === 'IMG') {
+          const src = el.currentSrc || el.src || el.dataset.src;
+          if (window.__linkyFilterJunk !== false) {
+            const w = Number(el.naturalWidth || el.width) || 0;
+            const h = Number(el.naturalHeight || el.height) || 0;
+            const label = String((el.className && el.className.baseVal !== undefined ? el.className.baseVal : el.className) || '') + ' ' + String(el.id || '');
+            if (w && h && (w < 300 || h < 300)) return;
+            if (/icon|logo|avatar|emoji|sprite|badge|button/i.test(label)) return;
+            const rect = el.getBoundingClientRect();
+            if (rect.width > 0 && rect.height > 0 &&
+                (rect.width < 120 || rect.height < 120)) return;
+          }
+          add(src, 'image', {
+            width: Number(el.naturalWidth || el.width) || null,
+            height: Number(el.naturalHeight || el.height) || null,
+            alt: el.alt || '',
+            title: el.title || '',
+            foundIn: 'img',
+            size: sizeOf(src)
+          });
+        } else {
+          const kind = el.tagName.toLowerCase();
+          const src = el.currentSrc || el.src;
+          if (kind === 'video') {
+            const vw = Number(el.videoWidth) || undefined;
+            const vh = Number(el.videoHeight) || undefined;
+            add(src, 'video', {
+              isPlaying: !el.paused && !el.ended && el.readyState >= 2,
+              foundIn: 'video element',
+              size: sizeOf(src),
+              thumbnail: posterOf(el),
+              width: vw,
+              height: vh,
+              durationSeconds: Number.isFinite(el.duration) ? el.duration : undefined
+            });
+          } else {
+            add(src, 'audio', {foundIn: 'audio element', size: sizeOf(src)});
+          }
+        }
+      });
+    } catch (_) {}
+    try {
+      performance.getEntriesByType('resource').forEach(entry => {
+        if (/\.(mp4|m4v|webm|mov|m3u8|mpd|m4s|ts|mp3|m4a|aac|ogg|opus|wav|flac)(?:$|[?#])/i.test(entry.name)) {
+          const bytes = Math.round(entry.encodedBodySize || entry.transferSize || 0);
+          add(entry.name, 'video', {foundIn: 'resource', size: bytes > 0 ? bytes : undefined});
+        }
+      });
+    } catch (_) {}
+    return out;
   })()''';
 
   final _addressController = TextEditingController();
@@ -523,6 +772,10 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
   int _tabCounter = 0;
   bool _serviceWorkerHooked = false;
   final _mediaExtractor = MediaExtractor();
+  Timer? _candidateRefreshTimer;
+  bool _appForeground = true;
+  bool _webViewReady = false;
+  Future<void>? _sessionRestore;
 
   _BrowserTab get _tab => _tabs[_activeIndex];
 
@@ -543,9 +796,160 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
     );
     _addressController.text = _tab.showHome ? '' : _tab.url;
     _addressFocus.addListener(_onAddressFocusChanged);
+    WidgetsBinding.instance.addObserver(this);
     BookmarksService.instance.addListener(_onBookmarksChanged);
+    if (widget.initialUrl.trim().isEmpty) {
+      _sessionRestore = _restoreSession();
+    }
+    _deferWebViewStart();
+  }
+
+  Future<void> _restoreSession() async {
+    await BrowserSessionService.instance.load();
+    final saved = BrowserSessionService.instance.tabs;
+    if (!mounted || saved.isEmpty) return;
+    setState(() {
+      _tabs
+        ..clear()
+        ..addAll(
+          saved.map(
+            (entry) => _BrowserTab(
+              id: 'tab-${_tabCounter++}',
+              url: entry.url,
+              desktopMode: entry.desktopMode,
+            )..title = entry.title,
+          ),
+        );
+      _activeIndex = BrowserSessionService.instance.activeIndex
+          .clamp(0, _tabs.length - 1)
+          .toInt();
+      _addressController.text = _tab.showHome ? '' : _tab.url;
+    });
+  }
+
+  void _persistSession() {
+    var active = 0;
+    final saved = <BrowserSessionTab>[];
+    for (var index = 0; index < _tabs.length; index++) {
+      final tab = _tabs[index];
+      if (tab.url.trim().isEmpty) continue;
+      if (index == _activeIndex) active = saved.length;
+      saved.add(
+        BrowserSessionTab(
+          url: tab.url,
+          title: tab.title,
+          desktopMode: tab.desktopMode,
+        ),
+      );
+    }
+    BrowserSessionService.instance.saveTabs(
+      tabs: saved,
+      activeIndex: saved.isEmpty ? 0 : active,
+    );
+  }
+
+  /// Creates the platform WebView only after the page transition finishes.
+  /// Inflating it mid-slide is what makes the push stutter.
+  void _deferWebViewStart() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final animation = ModalRoute.of(context)?.animation;
+      if (animation == null || animation.status == AnimationStatus.completed) {
+        unawaited(_activateWebView());
+        return;
+      }
+      void onStatus(AnimationStatus status) {
+        if (status != AnimationStatus.completed) return;
+        animation.removeStatusListener(onStatus);
+        unawaited(_activateWebView());
+      }
+
+      animation.addStatusListener(onStatus);
+    });
+  }
+
+  Future<void> _activateWebView() async {
+    if (!mounted || _webViewReady) return;
+    final restore = _sessionRestore;
+    if (restore != null) await restore;
+    if (!mounted || _webViewReady) return;
     unawaited(_installServiceWorkerInterceptor());
     unawaited(_cleanupStaleMseFiles());
+    setState(() => _webViewReady = true);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final foreground = state == AppLifecycleState.resumed;
+    if (foreground == _appForeground) return;
+    _appForeground = foreground;
+    final tab = _tab;
+    if (foreground) {
+      if (!tab.showHome && tab.url.isNotEmpty && !tab.loading) {
+        _startMonitoring(tab);
+      }
+    } else {
+      tab.monitorTimer?.cancel();
+      tab.monitorTimer = null;
+      _persistSession();
+      unawaited(BrowserSessionService.instance.flush());
+    }
+  }
+
+  void _scheduleCandidateRefresh([_BrowserTab? tab]) {
+    if (tab != null && tab != _tab) return;
+    if (!mounted) return;
+    if (_candidateRefreshTimer != null) return;
+    _candidateRefreshTimer = Timer(const Duration(milliseconds: 120), () {
+      _candidateRefreshTimer = null;
+      if (mounted) setState(() {});
+    });
+  }
+
+  final ValueNotifier<List<_ToastItem>> _toasts =
+      ValueNotifier<List<_ToastItem>>(const []);
+  final Map<int, Timer> _toastTimers = {};
+  OverlayEntry? _toastsEntry;
+  int _toastId = 0;
+
+  void _showTopToast(String message, {bool error = false}) {
+    final text = message.trim();
+    if (text.isEmpty || !mounted) return;
+    final item = _ToastItem(id: ++_toastId, message: text, error: error);
+    // Newest on top; drop the oldest when the stack is full.
+    final next = <_ToastItem>[item, ..._toasts.value];
+    while (next.length > 3) {
+      final removed = next.removeLast();
+      _toastTimers.remove(removed.id)?.cancel();
+    }
+    _toasts.value = List.unmodifiable(next);
+    _ensureToastsOverlay();
+    _toastTimers[item.id]?.cancel();
+    _toastTimers[item.id] = Timer(
+      const Duration(milliseconds: 2800),
+      () => _removeToast(item.id),
+    );
+  }
+
+  void _removeToast(int id) {
+    _toastTimers.remove(id)?.cancel();
+    final next =
+        _toasts.value.where((item) => item.id != id).toList(growable: false);
+    _toasts.value = List.unmodifiable(next);
+    if (next.isEmpty) _removeToastsOverlay();
+  }
+
+  void _ensureToastsOverlay() {
+    if (_toastsEntry != null || !mounted) return;
+    final overlay = Overlay.of(context, rootOverlay: true);
+    final entry = OverlayEntry(builder: (_) => _TopToasts(toasts: _toasts));
+    _toastsEntry = entry;
+    overlay.insert(entry);
+  }
+
+  void _removeToastsOverlay() {
+    _toastsEntry?.remove();
+    _toastsEntry = null;
   }
 
   void _onAddressFocusChanged() {
@@ -564,25 +968,35 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
     setState(() => _suggestions = suggestions);
   }
 
-  void _addTab([String url = '']) {
+  void _addTab([String url = '', String? openerId]) {
     final tab = _BrowserTab(
       id: 'tab-${_tabCounter++}',
       url: url,
       desktopMode: SettingsService.instance.desktopMode,
+      openerId: openerId,
     );
     setState(() {
       _tabs.add(tab);
       _activeIndex = _tabs.length - 1;
       _addressController.text = tab.showHome ? '' : tab.url;
     });
+    _persistSession();
   }
 
   void _selectTab(int index) {
     if (index == _activeIndex || index < 0 || index >= _tabs.length) return;
+    final previous = _tab;
+    previous.monitorTimer?.cancel();
+    previous.monitorTimer = null;
     setState(() {
       _activeIndex = index;
       _addressController.text = _tab.showHome ? '' : _tab.url;
     });
+    _persistSession();
+    final next = _tab;
+    if (!next.showHome && next.url.isNotEmpty && !next.loading) {
+      _startMonitoring(next);
+    }
   }
 
   void _closeTab(int index) {
@@ -605,6 +1019,13 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
       if (_activeIndex > index) _activeIndex--;
       _addressController.text = _tab.showHome ? '' : _tab.url;
     });
+    _persistSession();
+    final next = _tab;
+    next.monitorTimer?.cancel();
+    next.monitorTimer = null;
+    if (!next.showHome && next.url.isNotEmpty && !next.loading) {
+      _startMonitoring(next);
+    }
   }
 
   void _onBookmarksChanged() {
@@ -665,6 +1086,11 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
     await _navigate();
   }
 
+  Future<void> _openUrlInNewTab(String url) async {
+    _addTab(url);
+    await _navigate();
+  }
+
   void _considerUrl(_BrowserTab tab, String? rawUrl,
       {String? initiator,
       String? title,
@@ -674,6 +1100,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
       Map<String, String> requestHeaders = const {},
       int? width,
       int? height,
+      int? size,
       String? foundIn}) {
     if (!mounted || rawUrl == null || rawUrl.isEmpty || rawUrl.length > 8192)
       return;
@@ -949,6 +1376,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
       alt: alt,
       width: width,
       height: height,
+      size: size,
       foundIn: foundIn ?? initiator,
       thumbnail: thumbnail,
       isPlaying: isPlaying,
@@ -1079,6 +1507,63 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
     }
   }
 
+  static final RegExp _streamPathPattern = RegExp(
+    r'(video|stream|media|play|live|audio|manifest|hls|dash|m3u8|mpd|playback|m4s|videoplayback)',
+    caseSensitive: false,
+  );
+
+  bool _looksLikeStream(Uri uri) => _streamPathPattern.hasMatch(uri.path);
+
+  // Images are detected from the DOM (where we know their real dimensions) so
+  // network interception does not flood the list with favicons, sprites and
+  // other tiny UI images.
+  static const _imageExtensions = {
+    'jpg',
+    'jpeg',
+    'jpe',
+    'jfif',
+    'png',
+    'gif',
+    'webp',
+    'svg',
+    'bmp',
+    'ico',
+    'avif',
+    'heic',
+    'heif',
+    'tif',
+    'tiff',
+    'apng',
+    'jp2',
+    'j2k',
+    'jpf',
+    'jpx',
+    'jpm',
+    'mj2',
+    'pcx',
+    'tga',
+    'wbmp',
+    'xbm',
+    'dib',
+    'emf',
+    'wmf',
+    'ras',
+    'icns',
+    'cur',
+    'fpx',
+    'bpg',
+    'qoi',
+    'hdr',
+    'exr',
+    'pbm',
+    'pgm',
+    'ppm',
+    'pam',
+    'psd',
+    'dng',
+    'jxl',
+  };
+
   bool _isStreamCandidate(MediaItem item) {
     if (item.type != 'video') return false;
     final mime = item.mimeType?.toLowerCase() ?? '';
@@ -1141,11 +1626,8 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
       tab.candidateKeys.removeWhere((key, value) => value.startsWith('blob:'));
     }
 
-    if (tab == _tab) {
-      setState(remove);
-    } else {
-      remove();
-    }
+    remove();
+    _scheduleCandidateRefresh(tab);
   }
 
   String _mediaExtension(Uri uri) {
@@ -1488,8 +1970,8 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
 
   bool _isJunkImage(String url, int? width, int? height, String? foundIn) {
     if (foundIn == 'post images') return false;
-    if ((width != null && width > 0 && width < 200) ||
-        (height != null && height > 0 && height < 200)) {
+    if ((width != null && width > 0 && width < 300) ||
+        (height != null && height > 0 && height < 300)) {
       return true;
     }
     final uri = Uri.tryParse(url);
@@ -1510,6 +1992,38 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
       r'placeholder|spinner|loading|tracking|analytics|doubleclick|'
       r'googlesyndication|advert|banner[^/]*ad|favicon|emoji|'
       r'checkmark|/24px|/16px|/32px|\.svg$|\.ico$',
+      caseSensitive: false,
+    ).hasMatch(path);
+  }
+
+  bool _isJunkVideo(
+    String url,
+    int? width,
+    int? height,
+    int? durationSeconds,
+  ) {
+    if (width != null &&
+        height != null &&
+        width > 0 &&
+        height > 0 &&
+        width < 300 &&
+        height < 300) {
+      return true;
+    }
+    if (durationSeconds != null && durationSeconds > 0 && durationSeconds < 2) {
+      return true;
+    }
+    final uri = Uri.tryParse(url);
+    final host = uri?.host.toLowerCase() ?? '';
+    if (host == 'static.xx.fbcdn.net' ||
+        host == 'static.cdninstagram.com' ||
+        host == 'abs.twimg.com') {
+      return true;
+    }
+    final path = uri?.path.toLowerCase() ?? url.toLowerCase();
+    return RegExp(
+      r'/rsrc\.php|/emoji|/sticker|/reaction|/sprites?/|/ads?/|/advert|'
+      r'/preview|/placeholder|/loading|/pixel|/beacon|_thumb\.|-thumb\.',
       caseSensitive: false,
     ).hasMatch(path);
   }
@@ -1537,7 +2051,17 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
       String? sourcePage}) {
     if (!SettingsService.instance.isTypeEnabled(kind)) return;
     if (!SettingsService.instance.passesSizeThreshold(size)) return;
-    if (kind == 'image' && _isJunkImage(url, width, height, foundIn)) {
+    if (kind == 'image' && SettingsService.instance.filterJunkMedia) {
+      if (_isJunkImage(url, width, height, foundIn)) return;
+      // No DOM dimensions (e.g. an image loaded through fetch/XHR). A known
+      // payload this small is almost always an icon or sprite.
+      final noDimensions =
+          (width == null || width <= 0) && (height == null || height <= 0);
+      if (noDimensions && size != null && size > 0 && size < 4096) return;
+    }
+    if (kind == 'video' &&
+        SettingsService.instance.filterJunkMedia &&
+        _isJunkVideo(url, width, height, durationSeconds)) {
       return;
     }
     if (kind == 'image' && _isFacebookPage(tab.url)) {
@@ -1566,14 +2090,24 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
       final isYouTube = host.endsWith('youtube.com') || host == 'youtu.be';
       if (hasExtractorVideo || isYouTube) {
         if (tab.blobVideoPlaying != isPlaying) {
-          if (tab == _tab) {
-            setState(() => tab.blobVideoPlaying = isPlaying);
-          } else {
-            tab.blobVideoPlaying = isPlaying;
-          }
+          tab.blobVideoPlaying = isPlaying;
+          _scheduleCandidateRefresh(tab);
         }
         return;
       }
+    }
+    // Only one video can be "currently playing"; a new play event clears the
+    // previous one so Reels scrolling always points at the visible video.
+    if (kind == 'video' && isPlaying) {
+      var cleared = false;
+      for (final entry in tab.candidates.entries.toList(growable: false)) {
+        final item = entry.value;
+        if (item.type == 'video' && item.isPlaying && item.url != url) {
+          tab.candidates[entry.key] = item.withPlaying(false);
+          cleared = true;
+        }
+      }
+      if (cleared) _scheduleCandidateRefresh(tab);
     }
     final candidate = MediaItem(
       url: url,
@@ -1614,7 +2148,8 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
               candidate.requestHeaders.isNotEmpty) ||
           (existing.formatId == null && candidate.formatId != null) ||
           (existing.audioFormatId == null && candidate.audioFormatId != null) ||
-          (candidate.foundIn == 'video element' &&
+          ((candidate.foundIn == 'video element' ||
+                  candidate.foundIn == 'media element') &&
               existing.isPlaying != candidate.isPlaying)) {
         final updated = MediaItem(
           url: existing.url,
@@ -1624,7 +2159,8 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
               : existing.title,
           mimeType: candidate.mimeType ?? existing.mimeType,
           thumbnail: existing.thumbnail ?? candidate.thumbnail,
-          isPlaying: candidate.foundIn == 'video element'
+          isPlaying: candidate.foundIn == 'video element' ||
+                  candidate.foundIn == 'media element'
               ? candidate.isPlaying
               : existing.isPlaying,
           sourcePage: existing.sourcePage,
@@ -1649,11 +2185,8 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
           requiresExtractor:
               candidate.requiresExtractor || existing.requiresExtractor,
         );
-        if (tab == _tab) {
-          setState(() => tab.candidates[existing.url] = updated);
-        } else {
-          tab.candidates[existing.url] = updated;
-        }
+        tab.candidates[existing.url] = updated;
+        _scheduleCandidateRefresh(tab);
       }
       return;
     }
@@ -1671,19 +2204,29 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
       tab.candidateKeys[key] = candidate.url;
     }
 
-    if (tab == _tab) {
-      setState(add);
-    } else {
-      add();
+    add();
+    if (kind == 'video' && thumbnail != null && thumbnail.isNotEmpty) {
+      tab.videoPoster = thumbnail;
     }
+    _scheduleCandidateRefresh(tab);
   }
 
   String _normalizedCandidateKey(String rawUrl) {
     final uri = Uri.tryParse(rawUrl);
     if (uri == null || uri.scheme == 'blob') return rawUrl;
+    // Byte-range parameters change on every request for the same file; only
+    // Facebook's CDN signature params are also ignored, so other sites keep
+    // their own distinct query keys.
+    const volatile = {'bytestart', 'byteend', 'range'};
+    final host = uri.host.toLowerCase();
+    final facebookHost =
+        host.contains('fbcdn.net') || host.endsWith('facebook.com');
     final sorted = <String, dynamic>{};
     final keys = uri.queryParametersAll.keys.toList()..sort();
     for (final key in keys) {
+      final lower = key.toLowerCase();
+      if (volatile.contains(lower)) continue;
+      if (facebookHost && (lower == 'oh' || lower == 'oe')) continue;
       final values = uri.queryParametersAll[key]!;
       sorted[key] = values.length == 1 ? values.single : values;
     }
@@ -1692,12 +2235,18 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
         .toString();
   }
 
-  Future<void> _scanPage(_BrowserTab tab) async {
+  Future<void> _scanPage(_BrowserTab tab, {bool deep = true}) async {
     final controller = tab.controller;
-    if (controller == null) return;
+    if (controller == null || tab.scanning) return;
+    tab.scanning = true;
     try {
-      final result =
-          await controller.evaluateJavascript(source: _monitorScript);
+      final filterJunk = SettingsService.instance.filterJunkMedia;
+      final result = await controller
+          .evaluateJavascript(
+            source:
+                'window.__linkyFilterJunk = $filterJunk;\n${deep ? _monitorScanScript : _quickScanScript}',
+          )
+          .timeout(const Duration(seconds: 8), onTimeout: () => null);
       if (result is! List) return;
       final before = tab.candidateKeys.length;
       for (final entry in result) {
@@ -1711,6 +2260,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
           width: entry['width'] is num ? (entry['width'] as num).toInt() : null,
           height:
               entry['height'] is num ? (entry['height'] as num).toInt() : null,
+          size: entry['size'] is num ? (entry['size'] as num).toInt() : null,
           foundIn: entry['foundIn']?.toString(),
           thumbnail: entry['thumbnail']?.toString(),
           isPlaying: entry['isPlaying'] == true,
@@ -1727,6 +2277,8 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
       }
     } catch (_) {
       // The page can navigate or close while a scan is in flight.
+    } finally {
+      tab.scanning = false;
     }
   }
 
@@ -1780,16 +2332,32 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
       final resolvedKind = explicitKind.isNotEmpty ? explicitKind : kind;
       final isPlaying = data['isPlaying'] == true;
       final duration = (data['durationSeconds'] as num?)?.round();
+      final size = (data['size'] as num?)?.toInt();
+      final thumbnailRaw = (data['thumbnail'] ?? '').toString();
+      final thumbnail = thumbnailRaw.isEmpty ? null : thumbnailRaw;
+      final width = (data['width'] as num?)?.toInt();
+      final height = (data['height'] as num?)?.toInt();
+      final pageRaw = (data['page'] ?? '').toString();
+      final sourcePage = pageRaw.isEmpty ? null : pageRaw;
+      final titleRaw = (data['title'] ?? '').toString().trim();
+      final fallbackTitle =
+          uri.pathSegments.isEmpty ? resolvedKind : uri.pathSegments.last;
+      final title = titleRaw.isNotEmpty ? titleRaw : fallbackTitle;
       if ({'http', 'https'}.contains(uri.scheme)) {
         _addCandidate(
           tab,
           uri.toString(),
           resolvedKind,
-          uri.pathSegments.isEmpty ? resolvedKind : uri.pathSegments.last,
+          title,
           mime,
           foundIn: (data['foundIn'] ?? 'fetch/XHR').toString(),
           isPlaying: isPlaying,
           durationSeconds: duration,
+          size: size,
+          thumbnail: thumbnail,
+          width: width,
+          height: height,
+          sourcePage: sourcePage,
         );
       } else if (uri.scheme == 'blob' &&
           (resolvedKind == 'video' || resolvedKind == 'audio')) {
@@ -1802,6 +2370,10 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
           foundIn: (data['foundIn'] ?? 'media element').toString(),
           isPlaying: isPlaying,
           durationSeconds: duration,
+          thumbnail: thumbnail,
+          width: width,
+          height: height,
+          sourcePage: sourcePage,
         );
       }
     } catch (_) {}
@@ -1825,6 +2397,11 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
               );
             }
             if (!mounted) return null;
+            final isStream = _looksLikeStream(uri);
+            final extension = _mediaExtension(uri);
+            final isImage =
+                extension.isNotEmpty && _imageExtensions.contains(extension);
+            if (!isStream && (extension.isEmpty || isImage)) return null;
             final headers = request.headers ?? const <String, String>{};
             _considerUrl(
               _tab,
@@ -1832,10 +2409,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
               initiator: 'service worker',
               requestHeaders: headers,
             );
-            if (RegExp(
-              r'(video|stream|media|play|live|audio|manifest|hls|dash|m3u8|mpd)',
-              caseSensitive: false,
-            ).hasMatch(uri.path)) {
+            if (isStream) {
               unawaited(_probeMediaRequest(_tab, uri.toString(), headers));
             }
             return null;
@@ -1847,10 +2421,15 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
 
   void _startMonitoring(_BrowserTab tab) {
     tab.monitorTimer?.cancel();
+    tab.monitorTimer = null;
+    if (!mounted || !_appForeground || tab != _tab || tab.showHome) return;
     _scanPage(tab);
     tab.monitorTimer = Timer.periodic(
-      const Duration(seconds: 2),
-      (_) => _scanPage(tab),
+      const Duration(seconds: 3),
+      (_) {
+        if (!mounted || !_appForeground || tab != _tab) return;
+        _scanPage(tab, deep: false);
+      },
     );
   }
 
@@ -2067,13 +2646,12 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
     return videos.isEmpty ? const [] : [videos.first];
   }
 
-  Widget _playingVideoStrip() => SizedBox(
-        key: const ValueKey('linky-browser-playing-strip'),
+  Widget _playingVideoStrip(List<MediaItem> videos) => SizedBox(
         height: 76,
         child: ListView(
           scrollDirection: Axis.horizontal,
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-          children: _playingVideos
+          children: videos
               .map((item) => Padding(
                     padding: const EdgeInsets.only(right: 10),
                     child: Material(
@@ -2094,7 +2672,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
                               MediaThumbnail(
                                 type: 'video',
                                 url: item.url,
-                                poster: item.thumbnail,
+                                poster: item.thumbnail ?? _tab.videoPoster,
                                 size: 48,
                                 fallback: const Icon(Icons.movie_outlined,
                                     color: AppColors.forestMuted),
@@ -2207,15 +2785,11 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
     final canGoBack = await controller.canGoBack();
     final canGoForward = await controller.canGoForward();
     if (!mounted) return;
-    if (tab == _tab) {
-      setState(() {
-        tab.canGoBack = canGoBack;
-        tab.canGoForward = canGoForward;
-      });
-    } else {
-      tab.canGoBack = canGoBack;
-      tab.canGoForward = canGoForward;
-    }
+    final changed =
+        tab.canGoBack != canGoBack || tab.canGoForward != canGoForward;
+    tab.canGoBack = canGoBack;
+    tab.canGoForward = canGoForward;
+    if (changed && tab == _tab) setState(() {});
   }
 
   Future<Map<String, String>> _headersFor(MediaItem item) async {
@@ -2254,9 +2828,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
   Future<void> _previewCandidate(MediaItem item) async {
     final uri = Uri.tryParse(item.url);
     if (uri == null || !{'http', 'https'}.contains(uri.scheme)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('This item cannot be previewed.')),
-      );
+      _showTopToast('This item cannot be previewed.', error: true);
       return;
     }
     final headers = await _headersFor(item);
@@ -2301,9 +2873,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
     }
     if (!{'http', 'https'}.contains(scheme)) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('This download link is not supported.')),
-      );
+      _showTopToast('This download link is not supported.', error: true);
       return;
     }
     DetectionLogService.instance.log(
@@ -2379,10 +2949,9 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
         extension.endsWith('.asx') ||
         item.mimeType?.toLowerCase().contains('scpls') == true;
     if (playlist && item.formatId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('This playlist format is not supported yet.'),
-        ),
+      _showTopToast(
+        'This playlist format is not supported yet.',
+        error: true,
       );
       return;
     }
@@ -2394,27 +2963,41 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
         extraHeaders: headers,
       );
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Queued ${record.filename} for download.'),
-          action: SnackBarAction(
-            label: 'Downloads',
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute<void>(
-                builder: (_) => const DownloadsScreen(),
-              ),
-            ),
-          ),
-        ),
-      );
+      _showTopToast('Download started: ${record.filename}');
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not start the download: $error')),
-      );
+      _showTopToast('Could not start the download: $error', error: true);
     } finally {
       if (mounted) setState(() => _downloading = false);
     }
+  }
+
+  Future<Directory> _captureDirectory() => LibraryFolders.instance.directoryFor(
+        SettingsService.instance.downloadFolder,
+      );
+
+  String get _captureFolderLabel {
+    final folder = SettingsService.instance.downloadFolder;
+    return folder.isEmpty ? 'Library' : folder;
+  }
+
+  Future<void> _registerCaptured(File file, MediaItem item) async {
+    String? taskId;
+    try {
+      final record = await DownloadService.instance.registerCapturedFile(
+        file,
+        title: item.title ?? item.groupTitle ?? file.uri.pathSegments.last,
+        type: item.type == 'audio' ? 'audio' : 'video',
+        sourcePage: item.sourcePage,
+      );
+      taskId = record.taskId;
+    } catch (_) {}
+    try {
+      await NotificationService.downloadComplete(
+        file.uri.pathSegments.last,
+        taskId: taskId ?? 'capture-${DateTime.now().microsecondsSinceEpoch}',
+      );
+    } catch (_) {}
   }
 
   Future<void> _downloadReadableBlob(
@@ -2427,12 +3010,23 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
     try {
       final captured = await _saveMseCapture(tab, item.url);
       if (captured != null && await captured.exists()) {
+        if (await captured.length() < 32 * 1024) {
+          try {
+            await captured.delete();
+          } catch (_) {}
+          if (!mounted) return;
+          setState(() => _downloading = false);
+          _showTopToast(
+            'The browser only exposed a tiny video fragment. Let the video play for a few seconds, then try again.',
+            error: true,
+          );
+          return;
+        }
+        await _registerCaptured(captured, item);
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(
-            'Saved ${captured.uri.pathSegments.last} to Downloads.',
-          ),
-        ));
+        _showTopToast(
+          'Saved ${captured.uri.pathSegments.last} to $_captureFolderLabel.',
+        );
         setState(() => _downloading = false);
         return;
       }
@@ -2468,15 +3062,29 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
         }
       })()''');
       final file = await capture.future.timeout(const Duration(minutes: 10));
+      if (await file.length() < 32 * 1024) {
+        try {
+          await file.delete();
+        } catch (_) {}
+        if (!mounted) return;
+        _showTopToast(
+          'The browser only exposed a tiny video fragment. Let the video play for a few seconds, then try again.',
+          error: true,
+        );
+        return;
+      }
+      await _registerCaptured(file, item);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('Saved ${file.uri.pathSegments.last} to Downloads.')));
+      _showTopToast(
+        'Saved ${file.uri.pathSegments.last} to $_captureFolderLabel.',
+      );
     } catch (error) {
       await _abortBlobCapture(tab, error);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(
-              'Could not save this browser video. Press play, let it buffer for a few seconds, then try again. ($error)')));
+      _showTopToast(
+        'Could not save this browser video. Press play, let it buffer for a few seconds, then try again. ($error)',
+        error: true,
+      );
     } finally {
       tab.blobCapture = null;
       tab.blobSink = null;
@@ -2500,7 +3108,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
       if (!mime.toLowerCase().startsWith('video/')) {
         throw const FormatException('The browser blob is not a video file.');
       }
-      final directory = await StorageService.instance.downloadDirectory();
+      final directory = await _captureDirectory();
       final extension = MediaDownloader.extensionForMime(mime);
       final timestamp = DateTime.now().millisecondsSinceEpoch;
       var file = File('${directory.path}/browser-video-$timestamp.$extension');
@@ -2673,7 +3281,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
         if (video == null || track.bytes > video.bytes) video = track;
       }
     }
-    final directory = await StorageService.instance.downloadDirectory();
+    final directory = await _captureDirectory();
     final stamp = DateTime.now().millisecondsSinceEpoch;
     final base =
         '${directory.path}${Platform.pathSeparator}browser-video-$stamp';
@@ -2827,7 +3435,15 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
           builder: (sheetContext, setSheetState) {
             final grouped = <String, Map<String, List<MediaItem>>>{};
             final playingVideos = _playingVideos;
-            final hasPlayingVideo = playingVideos.isNotEmpty;
+            final hasDirectVideo = _candidates.values.any((item) =>
+                item.type == 'video' &&
+                !item.url.startsWith('blob:') &&
+                item.isDownloadable);
+            final playingOnlyBlob = hasDirectVideo &&
+                playingVideos.isNotEmpty &&
+                playingVideos.every((item) => item.url.startsWith('blob:'));
+            final hasPlayingVideo =
+                playingVideos.isNotEmpty && !playingOnlyBlob;
             final playingGroups = <String>{
               for (final item in playingVideos)
                 if (item.groupTitle != null) item.groupTitle!,
@@ -2840,6 +3456,13 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
               if (videosOnly && item.type != 'video') continue;
               if (!SettingsService.instance.isTypeEnabled(item.type)) continue;
               if (!SettingsService.instance.passesSizeThreshold(item.size)) {
+                continue;
+              }
+              // When the page exposes a real HLS/MP4 source, don't offer the
+              // partial browser blob capture, which often saves a tiny file.
+              if (hasDirectVideo &&
+                  item.type == 'video' &&
+                  item.url.startsWith('blob:')) {
                 continue;
               }
               final lowQualityImage = item.type == 'image' &&
@@ -3068,7 +3691,10 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
                                         ? MediaThumbnail(
                                             type: item.type,
                                             url: item.url,
-                                            poster: item.thumbnail,
+                                            poster: item.type == 'video'
+                                                ? (item.thumbnail ??
+                                                    _tab.videoPoster)
+                                                : item.thumbnail,
                                             size: 48,
                                             fallback: Icon(item.type == 'image'
                                                 ? Icons.image_outlined
@@ -3317,6 +3943,14 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _candidateRefreshTimer?.cancel();
+    for (final timer in _toastTimers.values) {
+      timer.cancel();
+    }
+    _toastTimers.clear();
+    _removeToastsOverlay();
+    _toasts.dispose();
     BookmarksService.instance.removeListener(_onBookmarksChanged);
     for (final tab in _tabs) {
       tab.monitorTimer?.cancel();
@@ -3325,15 +3959,20 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
     }
     _addressFocus.dispose();
     _addressController.dispose();
+    _persistSession();
+    unawaited(BrowserSessionService.instance.flush());
     super.dispose();
   }
 
-  InAppWebViewSettings _webSettings(_BrowserTab tab) => InAppWebViewSettings(
+  InAppWebViewSettings _webSettings(_BrowserTab tab) =>
+      tab.webSettings ??= InAppWebViewSettings(
         javaScriptEnabled: true,
-        mediaPlaybackRequiresUserGesture: true,
+        // Only Facebook gets gesture-free playback (Reels must start while
+        // scrolling); every other site keeps the default policy.
+        mediaPlaybackRequiresUserGesture: !tab.mediaAutoPlay,
         allowsInlineMediaPlayback: true,
         supportMultipleWindows: true,
-        useOnLoadResource: true,
+        useOnLoadResource: false,
         useShouldInterceptRequest: true,
         useOnDownloadStart: true,
         userAgent: tab.desktopMode ? _desktopUserAgent : _mobileUserAgent,
@@ -3343,10 +3982,48 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
         isTextInteractionEnabled: true,
       );
 
+  UnmodifiableListView<UserScript> _initialUserScripts(_BrowserTab tab) =>
+      tab.userScripts ??= UnmodifiableListView([
+        UserScript(
+          source: _webrtcBlockScript,
+          injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+          forMainFrameOnly: false,
+        ),
+        UserScript(
+          source: _monitorHooksScript,
+          injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+          forMainFrameOnly: false,
+        ),
+        if (SettingsService.instance.blockPopups)
+          UserScript(
+            source: _popupGuardScript,
+            injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+            forMainFrameOnly: false,
+          ),
+        UserScript(
+          source:
+              'window.__linkyAdBlockEnabled = ${SettingsService.instance.adBlockEnabled};',
+          injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+          forMainFrameOnly: false,
+        ),
+        UserScript(
+          source: _scriptAdBlockScript,
+          injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+          forMainFrameOnly: false,
+        ),
+        if (SettingsService.instance.adBlockEnabled)
+          UserScript(
+            source: AdBlockService.instance.baseCosmeticScript(),
+            injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+            forMainFrameOnly: false,
+          ),
+      ]);
+
   Future<void> _toggleDesktopMode() async {
     final tab = _tab;
     final value = !tab.desktopMode;
     tab.desktopMode = value;
+    tab.webSettings = null;
     await SettingsService.instance.setDesktopMode(value);
     try {
       await tab.controller?.setSettings(settings: _webSettings(tab));
@@ -3356,6 +4033,18 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
     try {
       await tab.controller?.reload();
     } catch (_) {}
+  }
+
+  void _syncMediaPlaybackPolicy(_BrowserTab tab, String url) {
+    final facebook = _isFacebookPage(url);
+    if (tab.mediaAutoPlay == facebook) return;
+    tab.mediaAutoPlay = facebook;
+    tab.webSettings = null;
+    final controller = tab.controller;
+    if (controller == null) return;
+    unawaited(
+      controller.setSettings(settings: _webSettings(tab)).catchError((_) {}),
+    );
   }
 
   Future<(bool, bool)> _confirmRedirect(
@@ -3473,46 +4162,13 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
           url: WebUri(tab.initialUrl.isEmpty ? 'about:blank' : tab.initialUrl),
         ),
         initialSettings: _webSettings(tab),
-        initialUserScripts: UnmodifiableListView([
-          UserScript(
-            source: _webrtcBlockScript,
-            injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
-          ),
-          UserScript(
-            source: _monitorScript,
-            injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
-            forMainFrameOnly: false,
-          ),
-          if (SettingsService.instance.blockPopups)
-            UserScript(
-              source: _popupGuardScript,
-              injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
-              forMainFrameOnly: false,
-            ),
-          UserScript(
-            source:
-                'window.__linkyAdBlockEnabled = ${SettingsService.instance.adBlockEnabled};',
-            injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
-            forMainFrameOnly: false,
-          ),
-          UserScript(
-            source: _scriptAdBlockScript,
-            injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
-            forMainFrameOnly: false,
-          ),
-          if (SettingsService.instance.adBlockEnabled)
-            UserScript(
-              source: AdBlockService.instance.baseCosmeticScript(),
-              injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
-              forMainFrameOnly: false,
-            ),
-        ]),
+        initialUserScripts: _initialUserScripts(tab),
         onCreateWindow: (controller, action) async {
           final url = action.request.url?.toString();
           if (url == null || !url.startsWith('http')) return false;
           if (!SettingsService.instance.blockPopups) {
             _clearClickedLink(tab);
-            _addTab(url);
+            _addTab(url, tab.id);
             return false;
           }
           // Open a new tab only when it is the link the user clicked.
@@ -3527,7 +4183,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
             );
             return false;
           }
-          _addTab(url);
+          _addTab(url, tab.id);
           return false;
         },
         onWebViewCreated: (controller) {
@@ -3576,7 +4232,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
                 return;
               }
               _clearClickedLink(tab);
-              _addTab(url);
+              _addTab(url, tab.id);
             },
           );
           controller.addJavaScriptHandler(
@@ -3635,6 +4291,8 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
         },
         onLoadStart: (controller, url) {
           if (!mounted) return;
+          tab.monitorTimer?.cancel();
+          tab.monitorTimer = null;
           unawaited(_cleanupMseTab(tab));
           tab.ytDlpInspectedUrl = null;
           tab.ytDlpRetried.clear();
@@ -3656,6 +4314,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
               tab.url = loaded;
             }
           }
+          _syncMediaPlaybackPolicy(tab, tab.url);
           if (tab == _tab) {
             _addressController.text = tab.showHome ? '' : tab.url;
             setState(() {});
@@ -3685,6 +4344,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
               tab.url = loaded;
             }
           }
+          _persistSession();
           if (tab == _tab) {
             _addressController.text = tab.showHome ? '' : tab.url;
             setState(() {});
@@ -3698,6 +4358,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
             if (!mounted || title == null || title.isEmpty) return;
             if (tab.title != title) {
               tab.title = title;
+              _persistSession();
               setState(() {});
               _retitleStreamCandidates(tab);
             }
@@ -3718,9 +4379,11 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
             tab.showHome = false;
             tab.url = next;
           }
+          _syncMediaPlaybackPolicy(tab, tab.showHome ? '' : next);
           if (tab == _tab) {
             _addressController.text = tab.showHome ? '' : next;
           }
+          _persistSession();
           if (next != previous && !tab.showHome) {
             tab.ytDlpInspectedUrl = null;
             tab.ytDlpRetried.clear();
@@ -3739,9 +4402,11 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
           );
         },
         shouldInterceptRequest: (controller, request) async {
-          if (request.isForMainFrame != true &&
+          final uri = request.url;
+          final isMainFrame = request.isForMainFrame == true;
+          if (!isMainFrame &&
               AdBlockService.instance.shouldBlock(
-                request.url,
+                uri,
                 documentUri: _webUri(tab.url),
               )) {
             return WebResourceResponse(
@@ -3749,17 +4414,30 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
               data: Uint8List(0),
             );
           }
-          _considerUrl(
-            tab,
-            request.url.toString(),
-            initiator: 'resource',
-            requestHeaders: request.headers ?? const {},
-          );
-          unawaited(_probeMediaRequest(
-            tab,
-            request.url.toString(),
-            request.headers ?? const {},
-          ));
+          // Inspecting every subresource (scripts, styles, fonts, API calls)
+          // is the single most expensive thing this screen can do. Only look
+          // at the main document and requests that can actually be media.
+          final isStream = _looksLikeStream(uri);
+          final extension = _mediaExtension(uri);
+          final isImage =
+              extension.isNotEmpty && _imageExtensions.contains(extension);
+          // Images are added from the DOM scan with their real dimensions;
+          // accepting raw image requests here only reintroduces tiny icons.
+          if (isMainFrame || isStream || (extension.isNotEmpty && !isImage)) {
+            _considerUrl(
+              tab,
+              uri.toString(),
+              initiator: 'resource',
+              requestHeaders: request.headers ?? const {},
+            );
+          }
+          if (isStream) {
+            unawaited(_probeMediaRequest(
+              tab,
+              uri.toString(),
+              request.headers ?? const {},
+            ));
+          }
           return null;
         },
         shouldOverrideUrlLoading: (controller, action) =>
@@ -4018,11 +4696,52 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
       await _updateNavigationState(tab);
       return;
     }
+    // A link opened in a new tab must return to the page that opened it
+    // instead of dropping the whole browser.
+    final openerId = tab.openerId;
+    if (openerId != null) {
+      final openerIndex = _tabs.indexWhere((t) => t.id == openerId);
+      if (openerIndex >= 0) {
+        _closeTab(_activeIndex);
+        final target = _tabs.indexWhere((t) => t.id == openerId);
+        if (target >= 0 && target != _activeIndex) _selectTab(target);
+        return;
+      }
+    }
+    if (_tabs.length > 1) {
+      _closeTab(_activeIndex);
+      return;
+    }
     if (!mounted) return;
-    Navigator.of(context).maybePop();
+    Navigator.of(context).pop();
+  }
+
+  void _closeBrowser() {
+    _addressFocus.unfocus();
+    if (!mounted) return;
+    Navigator.of(context).pop();
   }
 
   Widget _browserHeader(BuildContext context) {
+    final tab = _tab;
+    final uri = tab.showHome ? null : _webUri(tab.url);
+    final security = uri == null ? null : _securityHint(uri);
+    final secure = uri != null && uri.scheme.toLowerCase() == 'https';
+    final IconData leadingIcon;
+    final Color leadingColor;
+    if (uri == null) {
+      leadingIcon = Icons.public_rounded;
+      leadingColor = AppColors.forestMuted;
+    } else if (security != null) {
+      leadingIcon = Icons.warning_amber_rounded;
+      leadingColor = AppColors.primary;
+    } else if (secure) {
+      leadingIcon = Icons.lock_rounded;
+      leadingColor = AppColors.forestAccent;
+    } else {
+      leadingIcon = Icons.public_rounded;
+      leadingColor = AppColors.forestMuted;
+    }
     return Column(
       children: [
         Padding(
@@ -4040,8 +4759,15 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
                   ),
                   child: Row(
                     children: [
-                      Icon(Icons.lock_rounded,
-                          size: 15, color: AppColors.forestAccent),
+                      Tooltip(
+                        message: security ??
+                            (uri == null
+                                ? 'Start page'
+                                : secure
+                                    ? 'Secure connection'
+                                    : 'Not secure'),
+                        child: Icon(leadingIcon, size: 15, color: leadingColor),
+                      ),
                       const SizedBox(width: 8),
                       Expanded(
                         child: TextField(
@@ -4067,26 +4793,52 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
                         ),
                       ),
                       IconButton(
-                        tooltip: 'Reload page',
+                        tooltip: tab.loading ? 'Stop loading' : 'Reload page',
                         visualDensity: VisualDensity.compact,
-                        onPressed: () => _webController?.reload(),
-                        icon: const Icon(Icons.refresh_rounded,
-                            size: 17, color: AppColors.forestMuted),
+                        onPressed: () {
+                          if (tab.loading) {
+                            _webController?.stopLoading();
+                          } else {
+                            _webController?.reload();
+                          }
+                        },
+                        icon: Icon(
+                          tab.loading
+                              ? Icons.close_rounded
+                              : Icons.refresh_rounded,
+                          size: 17,
+                          color: AppColors.forestMuted,
+                        ),
                       ),
                     ],
                   ),
                 ),
               ),
+              const SizedBox(width: 4),
+              IconButton(
+                tooltip: 'Close browser',
+                visualDensity: VisualDensity.compact,
+                onPressed: _closeBrowser,
+                icon: const Icon(
+                  Icons.close_rounded,
+                  size: 20,
+                  color: AppColors.forestMuted,
+                ),
+              ),
             ],
           ),
         ),
-        if (_tab.loading)
-          LinearProgressIndicator(
-            value: _tab.progress == 0 ? null : _tab.progress,
-            minHeight: 2,
-            color: AppColors.primary,
-            backgroundColor: AppColors.forestBorder,
-          ),
+        SizedBox(
+          height: 2,
+          child: tab.loading
+              ? LinearProgressIndicator(
+                  value: tab.progress == 0 ? null : tab.progress,
+                  minHeight: 2,
+                  color: AppColors.primary,
+                  backgroundColor: AppColors.forestBorder,
+                )
+              : null,
+        ),
       ],
     );
   }
@@ -4114,10 +4866,12 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
           children: [
             _toolButton(
               icon: Icons.arrow_back_rounded,
+              tooltip: 'Back',
               onTap: _handleBack,
             ),
             _toolButton(
               icon: Icons.arrow_forward_rounded,
+              tooltip: 'Forward',
               onTap: _tab.canGoForward
                   ? () async {
                       await _webController?.goForward();
@@ -4127,23 +4881,31 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
             ),
             _toolButton(
               icon: Icons.home_rounded,
-              onTap: _goAppHome,
+              tooltip: 'Start page',
+              highlighted: _tab.showHome,
+              onTap: _goHome,
             ),
             _toolButton(
               icon: _tab.desktopMode
                   ? Icons.phone_iphone_rounded
                   : Icons.desktop_windows_rounded,
+              tooltip: _tab.desktopMode
+                  ? 'Switch to mobile site'
+                  : 'Switch to desktop site',
               highlighted: _tab.desktopMode,
               onTap: _toggleDesktopMode,
             ),
             _toolButton(
               icon: Icons.download_rounded,
+              tooltip: 'Media found on this page',
               highlighted: true,
               badge: _candidates.isEmpty ? null : '${_candidates.length}',
               onTap: _candidates.isEmpty ? null : _showCandidates,
             ),
             _toolButton(
-              icon: Icons.tune_rounded,
+              icon: Icons.filter_none_rounded,
+              tooltip: 'Tabs',
+              badge: '${_tabs.length}',
               onTap: _showTabsSheet,
             ),
           ],
@@ -4152,13 +4914,28 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
     );
   }
 
-  void _goAppHome() {
-    ShellNavigation.instance.openTab(0);
-    Navigator.of(context).popUntil((route) => route.isFirst);
+  Future<void> _goHome() async {
+    final tab = _tab;
+    _addressFocus.unfocus();
+    if (tab.showHome) return;
+    tab.monitorTimer?.cancel();
+    tab.monitorTimer = null;
+    tab.showHome = true;
+    tab.url = '';
+    _addressController.text = '';
+    _resetCandidates(tab);
+    if (mounted) setState(() {});
+    _persistSession();
+    try {
+      await _webController?.loadUrl(
+        urlRequest: URLRequest(url: WebUri('about:blank')),
+      );
+    } catch (_) {}
   }
 
   Widget _toolButton({
     required IconData icon,
+    required String tooltip,
     required VoidCallback? onTap,
     bool highlighted = false,
     String? badge,
@@ -4169,25 +4946,28 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
         child: Stack(
           clipBehavior: Clip.none,
           children: [
-            Material(
-              color: highlighted
-                  ? AppAccent.current.accentDark
-                  : Colors.transparent,
-              borderRadius: BorderRadius.circular(14),
-              child: InkWell(
+            Tooltip(
+              message: tooltip,
+              child: Material(
+                color: highlighted
+                    ? AppAccent.current.accentDark
+                    : Colors.transparent,
                 borderRadius: BorderRadius.circular(14),
-                onTap: onTap,
-                child: SizedBox(
-                  width: 44,
-                  height: 44,
-                  child: Icon(
-                    icon,
-                    size: 20,
-                    color: !enabled
-                        ? AppColors.forestMuted.withValues(alpha: 0.6)
-                        : highlighted
-                            ? AppColors.forestAccent
-                            : AppColors.forestText,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(14),
+                  onTap: onTap,
+                  child: SizedBox(
+                    width: 44,
+                    height: 44,
+                    child: Icon(
+                      icon,
+                      size: 20,
+                      color: !enabled
+                          ? AppColors.forestMuted.withValues(alpha: 0.6)
+                          : highlighted
+                              ? AppColors.forestAccent
+                              : AppColors.forestText,
+                    ),
                   ),
                 ),
               ),
@@ -4218,11 +4998,71 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
     );
   }
 
+  Widget _suggestionsPanel(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.forestSurface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.forestBorder),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.45),
+            blurRadius: 24,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxHeight: 260),
+        child: ListView(
+          shrinkWrap: true,
+          padding: EdgeInsets.zero,
+          children: [
+            for (final suggestion in _suggestions)
+              ListTile(
+                dense: true,
+                iconColor: AppColors.forestAccent,
+                textColor: AppColors.forestText,
+                leading: Icon(
+                  suggestion.source == 'History'
+                      ? Icons.history_rounded
+                      : suggestion.source == 'Bookmark'
+                          ? Icons.bookmark_outline_rounded
+                          : Icons.public_rounded,
+                  color: AppColors.forestAccent,
+                ),
+                title: Text(
+                  suggestion.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppText.body(13,
+                      weight: FontWeight.w600, color: AppColors.forestText),
+                ),
+                subtitle: Text(
+                  '${suggestion.source} · ${suggestion.url}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppText.body(11, color: AppColors.forestMuted),
+                ),
+                onTap: () {
+                  _addressController.text = suggestion.url;
+                  _navigate();
+                },
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final canGoBack = _tab.canGoBack;
+    final playingVideos = _playingVideos;
     return PopScope(
-      canPop: !canGoBack,
+      // Always intercept so system back follows the same history rules as the
+      // toolbar: page history, then the opener tab, then exit.
+      canPop: false,
       onPopInvokedWithResult: (didPop, result) {
         if (didPop) return;
         _handleBack();
@@ -4235,58 +5075,6 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
             children: [
               _browserHeader(context),
               const SizedBox(height: 6),
-              if (_addressFocus.hasFocus && _suggestions.isNotEmpty)
-                Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 16),
-                  decoration: BoxDecoration(
-                    color: AppColors.forestSurface,
-                    borderRadius: BorderRadius.circular(18),
-                    border: Border.all(color: AppColors.forestBorder),
-                  ),
-                  clipBehavior: Clip.antiAlias,
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxHeight: 260),
-                    child: ListView(
-                      shrinkWrap: true,
-                      padding: EdgeInsets.zero,
-                      children: [
-                        for (final suggestion in _suggestions)
-                          ListTile(
-                            dense: true,
-                            iconColor: AppColors.forestAccent,
-                            textColor: AppColors.forestText,
-                            leading: Icon(
-                              suggestion.source == 'History'
-                                  ? Icons.history_rounded
-                                  : suggestion.source == 'Bookmark'
-                                      ? Icons.bookmark_outline_rounded
-                                      : Icons.public_rounded,
-                              color: AppColors.forestAccent,
-                            ),
-                            title: Text(
-                              suggestion.title,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: AppText.body(13,
-                                  weight: FontWeight.w600,
-                                  color: AppColors.forestText),
-                            ),
-                            subtitle: Text(
-                              '${suggestion.source} · ${suggestion.url}',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: AppText.body(11,
-                                  color: AppColors.forestMuted),
-                            ),
-                            onTap: () {
-                              _addressController.text = suggestion.url;
-                              _navigate();
-                            },
-                          ),
-                      ],
-                    ),
-                  ),
-                ),
               if (_error != null)
                 MaterialBanner(
                   key: const ValueKey('linky-browser-error-banner'),
@@ -4297,21 +5085,21 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
                         child: const Text('Dismiss'))
                   ],
                 ),
-              _playingVideos.isEmpty
-                  ? const SizedBox.shrink(
-                      key: ValueKey('linky-browser-playing-strip'),
-                    )
-                  : _playingVideoStrip(),
               Expanded(
                 key: const ValueKey('linky-browser-webview-slot'),
                 child: Stack(
                   children: [
                     Positioned.fill(
-                      child: IndexedStack(
-                        index: _activeIndex,
-                        children: [
-                          for (final tab in _tabs) _buildWebView(tab),
-                        ],
+                      child: Offstage(
+                        offstage: _tab.showHome,
+                        child: _webViewReady
+                            ? IndexedStack(
+                                index: _activeIndex,
+                                children: [
+                                  for (final tab in _tabs) _buildWebView(tab),
+                                ],
+                              )
+                            : const ColoredBox(color: AppColors.forest),
                       ),
                     ),
                     if (_tab.showHome)
@@ -4319,7 +5107,23 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen> {
                         child: BrowserHomePage(
                           onNavigate: _navigateFromHome,
                           onOpenUrl: _openUrlFromHome,
+                          onOpenInNewTab: _openUrlInNewTab,
                         ),
+                      ),
+                    if (_addressFocus.hasFocus && _suggestions.isNotEmpty)
+                      Positioned(
+                        top: 0,
+                        left: 16,
+                        right: 16,
+                        child: _suggestionsPanel(context),
+                      ),
+                    if (playingVideos.isNotEmpty)
+                      Positioned(
+                        key: const ValueKey('linky-browser-playing-strip'),
+                        left: 0,
+                        right: 0,
+                        bottom: 8,
+                        child: _playingVideoStrip(playingVideos),
                       ),
                   ],
                 ),
@@ -4338,11 +5142,13 @@ class _BrowserTab {
     required this.id,
     required String url,
     this.desktopMode = false,
+    this.openerId,
   })  : initialUrl = url.trim(),
         url = url.trim(),
         showHome = url.trim().isEmpty;
 
   final String id;
+  final String? openerId;
   final String initialUrl;
   String url;
   bool showHome;
@@ -4351,6 +5157,11 @@ class _BrowserTab {
   bool allowNextNavigation = false;
   final Set<String> redirectApproved = {};
   InAppWebViewController? controller;
+  InAppWebViewSettings? webSettings;
+  UnmodifiableListView<UserScript>? userScripts;
+  bool mediaAutoPlay = false;
+  bool scanning = false;
+  String? videoPoster;
   final Map<String, MediaItem> candidates = {};
   final Map<String, String> candidateKeys = {};
   Timer? monitorTimer;
@@ -4393,4 +5204,124 @@ class _MseTrack {
   final IOSink sink;
   int bytes = 0;
   bool closed = false;
+}
+
+class _ToastItem {
+  const _ToastItem({
+    required this.id,
+    required this.message,
+    required this.error,
+  });
+
+  final int id;
+  final String message;
+  final bool error;
+}
+
+class _TopToasts extends StatelessWidget {
+  const _TopToasts({required this.toasts});
+
+  final ValueListenable<List<_ToastItem>> toasts;
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<List<_ToastItem>>(
+      valueListenable: toasts,
+      builder: (context, items, _) {
+        if (items.isEmpty) return const SizedBox.shrink();
+        return Positioned.fill(
+          child: IgnorePointer(
+            child: SafeArea(
+              bottom: false,
+              child: Align(
+                alignment: Alignment.topCenter,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                  child: AnimatedSize(
+                    duration: const Duration(milliseconds: 180),
+                    curve: Curves.easeOutCubic,
+                    alignment: Alignment.topCenter,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        for (final item in items)
+                          Padding(
+                            key: ValueKey(item.id),
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: TweenAnimationBuilder<double>(
+                              tween: Tween<double>(begin: 0, end: 1),
+                              duration: const Duration(milliseconds: 200),
+                              curve: Curves.easeOutCubic,
+                              builder: (context, value, child) => Opacity(
+                                opacity: value,
+                                child: Transform.translate(
+                                  offset: Offset(0, -10 * (1 - value)),
+                                  child: child,
+                                ),
+                              ),
+                              child: _CapsuleToast(item: item),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _CapsuleToast extends StatelessWidget {
+  const _CapsuleToast({required this.item});
+
+  final _ToastItem item;
+
+  @override
+  Widget build(BuildContext context) {
+    final background = item.error ? const Color(0xFFC62828) : AppColors.primary;
+    return Container(
+      constraints: const BoxConstraints(maxWidth: 560),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(999),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.35),
+            blurRadius: 20,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            item.error
+                ? Icons.error_outline_rounded
+                : Icons.download_done_rounded,
+            size: 17,
+            color: Colors.white,
+          ),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              item.message,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: AppText.body(
+                12.5,
+                weight: FontWeight.w700,
+                color: Colors.white,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'app.dart';
 import 'services/adblock_service.dart';
 import 'services/bookmarks_service.dart';
+import 'services/browser_session_service.dart';
 import 'services/download_service.dart';
 import 'services/history_service.dart';
 import 'services/playback_position_service.dart';
@@ -48,6 +49,7 @@ Future<void> _initRemaining() async {
   await Future.wait<void>([
     HistoryService.instance.init().catchError((_) {}),
     BookmarksService.instance.init().catchError((_) {}),
+    BrowserSessionService.instance.load().catchError((_) {}),
     SuggestionsService.instance.init().catchError((_) {}),
     AdBlockService.instance.init().catchError((_) {}),
     ProxyService.instance.applyWebView().catchError((_) {}),

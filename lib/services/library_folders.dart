@@ -1,5 +1,7 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
+
 import 'storage_service.dart';
 
 class LibraryFolder {
@@ -21,7 +23,7 @@ class LibraryFolder {
 }
 
 /// Manages the user-created folders inside the library root.
-class LibraryFolders {
+class LibraryFolders extends ChangeNotifier {
   LibraryFolders._();
 
   static final LibraryFolders instance = LibraryFolders._();
@@ -49,22 +51,29 @@ class LibraryFolders {
     return segments.join('/');
   }
 
-  Future<Directory> rootDirectory() => StorageService.instance.downloadDirectory();
+  Future<Directory> rootDirectory() =>
+      StorageService.instance.downloadDirectory();
 
-  Future<Directory> directoryFor(String relative) async {
+  /// Resolves a library-relative path without creating it.
+  Future<Directory> _resolve(String relative) async {
     final root = await rootDirectory();
     final clean = normalize(relative);
     if (clean.isEmpty) return root;
-    final directory = Directory(
+    return Directory(
       '${root.path}${Platform.pathSeparator}'
       '${clean.split('/').join(Platform.pathSeparator)}',
     );
+  }
+
+  /// Resolves a library-relative path and makes sure the directory exists.
+  Future<Directory> directoryFor(String relative) async {
+    final directory = await _resolve(relative);
     await directory.create(recursive: true);
     return directory;
   }
 
   Future<List<LibraryFolder>> children([String relative = '']) async {
-    final directory = await directoryFor(relative);
+    final directory = await _resolve(relative);
     if (!await directory.exists()) return const [];
     final clean = normalize(relative);
     final folders = <LibraryFolder>[];
@@ -77,7 +86,8 @@ class LibraryFolders {
         LibraryFolder(relativePath: path, name: name, depth: _depth(path)),
       );
     }
-    folders.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    folders
+        .sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
     return folders;
   }
 
@@ -103,34 +113,87 @@ class LibraryFolders {
     final path = clean.isEmpty ? safe : '$clean/$safe';
     final directory = await directoryFor(path);
     await directory.create(recursive: true);
+    notifyListeners();
     return directory;
   }
 
   Future<String> rename(LibraryFolder folder, String newName) async {
-    final source = await directoryFor(folder.relativePath);
+    final source = await _resolve(folder.relativePath);
     if (!await source.exists()) return folder.relativePath;
     final safe = sanitize(newName);
     final parent = folder.parent;
     var candidate = safe;
-    var target = await directoryFor(_join(parent, candidate));
+    var target = await _resolve(_join(parent, candidate));
     var counter = 1;
     while (await target.exists() && target.path != source.path) {
       candidate = '$safe ($counter)';
-      target = await directoryFor(_join(parent, candidate));
+      target = await _resolve(_join(parent, candidate));
       counter++;
     }
     if (target.path == source.path) return folder.relativePath;
     await source.rename(target.path);
+    notifyListeners();
     return _join(parent, candidate);
   }
 
   Future<void> delete(LibraryFolder folder) async {
-    final directory = await directoryFor(folder.relativePath);
-    if (await directory.exists()) await directory.delete(recursive: true);
+    final clean = normalize(folder.relativePath);
+    if (clean.isEmpty) {
+      throw FileSystemException('The library root cannot be deleted.');
+    }
+    final directory = await _resolve(clean);
+    if (!await directory.exists()) return;
+    await _deleteDirectory(directory);
+    if (await directory.exists()) {
+      throw FileSystemException(
+        'Could not delete "${folder.name}".',
+        directory.path,
+      );
+    }
+    notifyListeners();
+  }
+
+  Future<void> _deleteDirectory(Directory directory) async {
+    Object? failure;
+    for (var attempt = 0; attempt < 3; attempt++) {
+      try {
+        await directory.delete(recursive: true);
+      } catch (error) {
+        failure ??= error;
+      }
+      if (!await directory.exists()) return;
+      // Some Android volumes refuse a recursive delete while entries are
+      // still open; remove children individually and try the root again.
+      try {
+        await for (final entity in directory.list(followLinks: false)) {
+          try {
+            await entity.delete(recursive: true);
+          } catch (error) {
+            failure ??= error;
+          }
+        }
+      } catch (error) {
+        failure ??= error;
+      }
+      try {
+        await directory.delete();
+      } catch (error) {
+        failure ??= error;
+      }
+      if (!await directory.exists()) return;
+      await Future<void>.delayed(const Duration(milliseconds: 120));
+    }
+    if (await directory.exists()) {
+      if (failure is FileSystemException) throw failure;
+      throw FileSystemException(
+        'Could not delete ${directory.path}',
+        directory.path,
+      );
+    }
   }
 
   Future<bool> isEmpty(LibraryFolder folder) async {
-    final directory = await directoryFor(folder.relativePath);
+    final directory = await _resolve(folder.relativePath);
     if (!await directory.exists()) return true;
     await for (final _ in directory.list(followLinks: false)) {
       return false;
