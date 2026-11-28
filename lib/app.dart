@@ -1,6 +1,5 @@
-import 'package:animated_splash_screen/animated_splash_screen.dart';
+import 'package:hugeicons/hugeicons.dart';
 import 'package:flutter/material.dart';
-import 'package:page_transition/page_transition.dart';
 
 import 'features/share/share_host.dart';
 import 'services/biometric_auth.dart';
@@ -34,71 +33,85 @@ class CometApp extends StatelessWidget {
   final String? initialShareText;
 
   @override
-  Widget build(BuildContext context) {
-    final settings = SettingsService.instance;
-    return ListenableBuilder(
-      listenable: settings,
-      builder: (context, _) {
-        AppAccent.current = AppAccent.byId(settings.accentColor);
-        return MaterialApp(
-          title: 'Comet',
-          debugShowCheckedModeBanner: false,
-          themeMode: settings.themeMode,
-          theme: AppTheme.light,
-          darkTheme: AppTheme.dark,
-          themeAnimationDuration: const Duration(milliseconds: 300),
-          themeAnimationCurve: Curves.easeOutCubic,
-          scrollBehavior: const _CometScrollBehavior(),
-          builder: (context, child) => _AppLockGate(child: child),
-          home: startInShareMode
-              ? ShareHost(
-                  startInShareMode: true,
-                  initialText: initialShareText,
-                )
-              : AnimatedSplashScreen(
-                  splash: const _SplashBrand(),
-                  nextScreen: const ShareHost(),
-                  backgroundColor: const Color(0xFF0F1017),
-                  duration: 900,
-                  animationDuration: const Duration(milliseconds: 400),
-                  splashTransition: SplashTransition.fadeTransition,
-                  pageTransitionType: PageTransitionType.fade,
-                  splashIconSize: 260,
-                ),
-        );
-      },
-    );
-  }
+  Widget build(BuildContext context) => _ThemedApp(
+        startInShareMode: startInShareMode,
+        initialShareText: initialShareText,
+      );
 }
 
-class _SplashBrand extends StatelessWidget {
-  const _SplashBrand();
+/// Rebuilds [MaterialApp] only when the theme or accent actually changes, so
+/// unrelated settings writes (detection toggles, download options, ...) no
+/// longer rebuild the entire widget tree.
+class _ThemedApp extends StatefulWidget {
+  const _ThemedApp({required this.startInShareMode, this.initialShareText});
+
+  final bool startInShareMode;
+  final String? initialShareText;
+
+  @override
+  State<_ThemedApp> createState() => _ThemedAppState();
+}
+
+class _ThemedAppState extends State<_ThemedApp> {
+  static const _maxTextScale = 1.3;
+
+  late ThemeMode _themeMode;
+  late String _accentColor;
+
+  @override
+  void initState() {
+    super.initState();
+    final settings = SettingsService.instance;
+    _themeMode = settings.themeMode;
+    _accentColor = settings.accentColor;
+    settings.addListener(_onSettingsChanged);
+  }
+
+  @override
+  void dispose() {
+    SettingsService.instance.removeListener(_onSettingsChanged);
+    super.dispose();
+  }
+
+  void _onSettingsChanged() {
+    final settings = SettingsService.instance;
+    if (settings.themeMode == _themeMode &&
+        settings.accentColor == _accentColor) {
+      return;
+    }
+    setState(() {
+      _themeMode = settings.themeMode;
+      _accentColor = settings.accentColor;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        const ClipOval(
-          child: Image(
-            image: AssetImage('assets/icon/cropped_circle_image.png'),
-            width: 120,
-            height: 120,
-            filterQuality: FilterQuality.medium,
+    AppAccent.current = AppAccent.byId(_accentColor);
+    return MaterialApp(
+      title: 'Comet',
+      debugShowCheckedModeBanner: false,
+      themeMode: _themeMode,
+      theme: AppTheme.light,
+      darkTheme: AppTheme.dark,
+      themeAnimationDuration: const Duration(milliseconds: 300),
+      themeAnimationCurve: Curves.easeOutCubic,
+      scrollBehavior: const _CometScrollBehavior(),
+      builder: (context, child) {
+        final media = MediaQuery.of(context);
+        return MediaQuery(
+          data: media.copyWith(
+            textScaler: media.textScaler.clamp(maxScaleFactor: _maxTextScale),
           ),
-        ),
-        const SizedBox(height: 16),
-        Text(
-          'Comet',
-          style: AppText.display(34, color: Colors.white),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          'Browse. Detect. Save.',
-          style: AppText.body(13, color: const Color(0xFF9AA1B2)),
-        ),
-      ],
+          child: _AppLockGate(child: child),
+        );
+      },
+      home: widget.startInShareMode
+          ? ShareHost(
+              startInShareMode: true,
+              initialText: widget.initialShareText,
+            )
+          : const ShareHost(),
     );
   }
 }
@@ -206,7 +219,7 @@ class _AppLockGateState extends State<_AppLockGate>
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.fingerprint_rounded,
+              HugeIcon(icon: HugeIcons.strokeRoundedFingerPrint,
                   size: 64, color: palette.foreground),
               const SizedBox(height: 18),
               Text('Comet is locked',
@@ -228,7 +241,7 @@ class _AppLockGateState extends State<_AppLockGate>
               const SizedBox(height: 26),
               FilledButton.icon(
                 onPressed: _authenticate,
-                icon: const Icon(Icons.lock_open_rounded),
+                icon: const HugeIcon(icon: HugeIcons.strokeRoundedLockOpen),
                 label: const Text('Unlock'),
               ),
             ],

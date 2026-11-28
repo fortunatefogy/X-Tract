@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'downloader_utils.dart';
 import 'proxy_service.dart';
 import 'secure_dns_service.dart';
 import 'dart:math';
@@ -219,7 +220,7 @@ class HlsDownloader {
           client: client,
           playlist: await _loadPlaylist(client, audioUri, headers),
           baseUrl: url,
-          destination: File('${_stem(destination.path)}.m4a'),
+          destination: File('${pathStem(destination.path)}.m4a'),
           workDirectory: Directory(
             '${workDirectory.path}${Platform.pathSeparator}audio',
           ),
@@ -257,7 +258,7 @@ class HlsDownloader {
             client: client,
             playlist: audioPlaylist,
             baseUrl: url,
-            destination: File('${_stem(destination.path)}.m4a'),
+            destination: File('${pathStem(destination.path)}.m4a'),
             workDirectory: Directory(
               '${workDirectory.path}${Platform.pathSeparator}audio',
             ),
@@ -265,13 +266,13 @@ class HlsDownloader {
             onProgress: (_, __) {},
             isCancelled: isCancelled,
           );
-          final muxedPath = '${_stem(destination.path)}.mp4';
+          final muxedPath = '${pathStem(destination.path)}.mp4';
           final muxed = await DeviceResources.instance
               .muxMedia(videoFile.path, audioFile.path, muxedPath);
           if (muxed != null && await File(muxed).exists()) {
             output = File(muxed);
-            await _deleteQuietly(videoFile);
-            await _deleteQuietly(audioFile);
+            await deleteQuietly(videoFile);
+            await deleteQuietly(audioFile);
           } else {
             warning =
                 'The separate audio track could not be merged; saved the video track only.';
@@ -389,13 +390,14 @@ class HlsDownloader {
     final audioInit = File(
       '${workDirectory.path}${Platform.pathSeparator}audio-init.bin',
     );
-    if (videoInitUri != null && !videoInit.existsSync()) {
+    final liveKeys = <String, Uint8List>{};
+    if (videoInitUri != null && !(await videoInit.exists())) {
       seen.remove('vi:$videoInitUri');
     }
-    if (audioInitUri != null && !audioInit.existsSync()) {
+    if (audioInitUri != null && !(await audioInit.exists())) {
       seen.remove('ai:$audioInitUri');
     }
-    var bytes = _directoryBytes(workDirectory);
+    var bytes = await _directoryBytes(workDirectory);
     String? warning;
     var stopped = false;
     var idlePolls = 0;
@@ -448,7 +450,7 @@ class HlsDownloader {
                 0,
                 headers,
                 client,
-                <String, Uint8List>{},
+                liveKeys,
               );
             }
             await videoInit.writeAsBytes(data, flush: true);
@@ -480,7 +482,7 @@ class HlsDownloader {
                 0,
                 headers,
                 client,
-                <String, Uint8List>{},
+                liveKeys,
               );
             }
             await audioInit.writeAsBytes(data, flush: true);
@@ -516,7 +518,7 @@ class HlsDownloader {
                 segment.sequence,
                 headers,
                 client,
-                <String, Uint8List>{},
+                liveKeys,
               );
             }
             await _writeLivePart(workDirectory, 'v', videoIndex++, data);
@@ -566,7 +568,7 @@ class HlsDownloader {
                 segment.sequence,
                 headers,
                 client,
-                <String, Uint8List>{},
+                liveKeys,
               );
             }
             await _writeLivePart(workDirectory, 'a', audioIndex++, data);
@@ -636,8 +638,8 @@ class HlsDownloader {
     final merged = await _mergeLiveParts(
       workDirectory: workDirectory,
       destination: destination,
-      videoInit: videoInit.existsSync() ? videoInit : null,
-      audioInit: audioInit.existsSync() ? audioInit : null,
+      videoInit: (await videoInit.exists()) ? videoInit : null,
+      audioInit: (await audioInit.exists()) ? audioInit : null,
       includeVideo: !audioOnly || audioUri == null,
     );
     try {
@@ -662,8 +664,8 @@ class HlsDownloader {
     required File? audioInit,
     required bool includeVideo,
   }) async {
-    final videoParts = _liveParts(workDirectory, 'v');
-    final audioParts = _liveParts(workDirectory, 'a');
+    final videoParts = await _liveParts(workDirectory, 'v');
+    final audioParts = await _liveParts(workDirectory, 'a');
     File? videoFile;
     File? audioFile;
     String? warning;
@@ -691,7 +693,7 @@ class HlsDownloader {
     }
 
     if (videoFile != null && audioFile != null) {
-      final muxedPath = '${_stem(destination.path)}.mp4';
+      final muxedPath = '${pathStem(destination.path)}.mp4';
       final muxed = await DeviceResources.instance
           .muxMedia(videoFile.path, audioFile.path, muxedPath);
       if (muxed != null && await File(muxed).exists()) {
@@ -705,17 +707,17 @@ class HlsDownloader {
     final extension = videoInit != null || audioInit != null
         ? (videoFile != null ? 'mp4' : 'm4a')
         : 'ts';
-    final target = File('${_stem(destination.path)}.$extension');
+    final target = File('${pathStem(destination.path)}.$extension');
     await target.parent.create(recursive: true);
-    await _deleteQuietly(target);
+    await deleteQuietly(target);
     await source.rename(target.path);
     return (target, warning);
   }
 
-  List<File> _liveParts(Directory directory, String prefix) {
+  Future<List<File>> _liveParts(Directory directory, String prefix) async {
     final files = <File>[];
     try {
-      for (final entity in directory.listSync()) {
+      await for (final entity in directory.list()) {
         if (entity is! File) continue;
         final name = entity.uri.pathSegments.last;
         if (name.startsWith('live-$prefix-') && name.endsWith('.bin')) {
@@ -756,11 +758,11 @@ class HlsDownloader {
     }
   }
 
-  int _directoryBytes(Directory directory) {
+  Future<int> _directoryBytes(Directory directory) async {
     var total = 0;
     try {
-      for (final entity in directory.listSync()) {
-        if (entity is File) total += entity.lengthSync();
+      await for (final entity in directory.list()) {
+        if (entity is File) total += await entity.length();
       }
     } catch (_) {}
     return total;
@@ -853,33 +855,10 @@ class HlsDownloader {
     await workDirectory.create(recursive: true);
     final container = _containerFor(playlist);
     final output = File(
-      '${_stem(destination.path)}.$container',
+      '${pathStem(destination.path)}.$container',
     );
     final keyCache = <String, Uint8List>{};
-    final completedFile = File(
-      '${workDirectory.path}${Platform.pathSeparator}completed.json',
-    );
     final completed = <int>{};
-    if (await completedFile.exists()) {
-      try {
-        final raw = jsonDecode(await completedFile.readAsString());
-        if (raw is List) {
-          completed.addAll(
-            raw.whereType<num>().map((value) => value.toInt()),
-          );
-        }
-      } catch (_) {}
-    }
-    var saveChain = Future<void>.value();
-    Future<void> saveCompleted() {
-      final snapshot = completed.toList()..sort();
-      saveChain = saveChain.then((_) async {
-        final temporary = File('${completedFile.path}.tmp');
-        await temporary.writeAsString(jsonEncode(snapshot), flush: true);
-        await temporary.rename(completedFile.path);
-      }).catchError((_) {});
-      return saveChain;
-    }
 
     final initFile =
         File('${workDirectory.path}${Platform.pathSeparator}init.bin');
@@ -910,10 +889,8 @@ class HlsDownloader {
       final existing = File(
         '${workDirectory.path}${Platform.pathSeparator}seg-$index.bin',
       );
-      if (existing.existsSync() && existing.lengthSync() > 0) {
+      if (await existing.exists() && await existing.length() > 0) {
         completed.add(index);
-      } else {
-        completed.remove(index);
       }
     }
     var next = 0;
@@ -953,7 +930,6 @@ class HlsDownloader {
           await segmentFile.writeAsBytes(data, flush: true);
           completed.add(index);
           completedCount = completed.length;
-          await saveCompleted();
           onProgress(completedCount, playlist.segments.length);
         }
       }),
@@ -1126,7 +1102,7 @@ class HlsDownloader {
     });
     if ((status == 400 || status == 403) && hasOriginHeaders) {
       // Some CDNs reject a mismatched Referer/Origin. Retry without them.
-      await _discard(response);
+      await discardResponse(response);
       final retryHeaders = <String, String>{...headers}
         ..removeWhere((key, value) {
           final name = key.toLowerCase();
@@ -1138,13 +1114,13 @@ class HlsDownloader {
     }
     if ((status == 400 || status == 403) && headers.isNotEmpty) {
       // Last resort: retry with no forwarded browser headers at all.
-      await _discard(response);
+      await discardResponse(response);
       (response, finalUri) = await _get(client, uri, const {}, range: range);
       status = response.statusCode;
     }
     if (status < 200 || status >= 300) {
       final snippet = await _readSnippet(response, 200);
-      await _discard(response);
+      await discardResponse(response);
       throw HttpException(
         'The HLS server returned HTTP $status for '
         '${uri.host}${uri.path}.'
@@ -1380,45 +1356,17 @@ class HlsDownloader {
     Uri uri,
     Map<String, String> headers, {
     String? range,
-  }) async {
-    var current = uri;
-    for (var redirects = 0;; redirects++) {
-      final request = await client.getUrl(current);
-      request.followRedirects = false;
-      if (current.origin == uri.origin) {
-        headers.forEach((key, value) {
-          final name = key.toLowerCase();
-          if (name == 'range' ||
-              name == 'if-range' ||
-              name == 'if-none-match' ||
-              name == 'if-modified-since' ||
-              name == 'accept-encoding' ||
-              name == 'content-length' ||
-              name == 'host') {
-            return;
-          }
-          try {
-            request.headers.set(key, value);
-          } catch (_) {}
-        });
-      }
-      if (range != null) request.headers.set(HttpHeaders.rangeHeader, range);
-      final response = await request.close();
-      if (!response.isRedirect) return (response, current);
-      if (redirects >= 5) {
-        await _discard(response);
-        throw const HttpException(
-            'The HLS playlist redirected too many times.');
-      }
-      final location = response.headers.value(HttpHeaders.locationHeader);
-      await _discard(response);
-      if (location == null) throw const HttpException('Invalid HLS redirect.');
-      current = current.resolve(location);
-      if (!{'http', 'https'}.contains(current.scheme)) {
-        throw const HttpException('Unsupported HLS redirect.');
-      }
-    }
-  }
+  }) =>
+      openFollowingRedirects(
+        client,
+        uri,
+        headers,
+        range: range,
+        skipCacheHeaders: true,
+        redirectLimitMessage: 'The HLS playlist redirected too many times.',
+        invalidRedirectMessage: 'Invalid HLS redirect.',
+        unsupportedRedirectMessage: 'Unsupported HLS redirect.',
+      );
 
   Future<String> _readSnippet(HttpClientResponse response, int maximum) async {
     final buffer = <int>[];
@@ -1434,25 +1382,4 @@ class HlsDownloader {
         .trim();
   }
 
-  Future<void> _discard(HttpClientResponse response) async {
-    try {
-      final socket = await response.detachSocket();
-      socket.destroy();
-    } catch (_) {
-      try {
-        await response.drain<void>();
-      } catch (_) {}
-    }
-  }
-
-  String _stem(String path) {
-    final dot = path.lastIndexOf('.');
-    return dot > 0 ? path.substring(0, dot) : path;
-  }
-
-  Future<void> _deleteQuietly(File file) async {
-    try {
-      if (await file.exists()) await file.delete();
-    } catch (_) {}
-  }
 }

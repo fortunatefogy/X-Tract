@@ -1,3 +1,4 @@
+import 'package:hugeicons/hugeicons.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -172,8 +173,8 @@ class _BrowserHomePageState extends State<BrowserHomePage> {
             ),
             borderRadius: BorderRadius.circular(16),
           ),
-          child: const Icon(
-            Icons.travel_explore_rounded,
+          child: const HugeIcon(icon: 
+            HugeIcons.strokeRoundedGlobe,
             color: Colors.white,
             size: 24,
           ),
@@ -314,7 +315,7 @@ class _BrowserHomePageState extends State<BrowserHomePage> {
           ),
           child: Text(
             '$count',
-            style: AppText.label(10, color: AppColors.forestAccent),
+            style: AppText.label(11, color: AppColors.forestAccent),
           ),
         ),
       ],
@@ -391,7 +392,7 @@ class _BrowserHomePageState extends State<BrowserHomePage> {
                 host,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: AppText.body(10, color: AppColors.forestMuted),
+                style: AppText.body(11, color: AppColors.forestMuted),
               ),
             ],
           ),
@@ -439,7 +440,7 @@ class _BrowserHomePageState extends State<BrowserHomePage> {
               ),
               if (widget.onOpenInNewTab != null)
                 ListTile(
-                  leading: const Icon(Icons.open_in_new_rounded),
+                  leading: const HugeIcon(icon: HugeIcons.strokeRoundedArrowUpRight01),
                   title: const Text('Open in new tab'),
                   onTap: () {
                     Navigator.of(sheetContext).pop();
@@ -447,7 +448,7 @@ class _BrowserHomePageState extends State<BrowserHomePage> {
                   },
                 ),
               ListTile(
-                leading: const Icon(Icons.copy_rounded),
+                leading: const HugeIcon(icon: HugeIcons.strokeRoundedCopy01),
                 title: const Text('Copy link'),
                 onTap: () async {
                   Navigator.of(sheetContext).pop();
@@ -459,7 +460,7 @@ class _BrowserHomePageState extends State<BrowserHomePage> {
                 },
               ),
               ListTile(
-                leading: const Icon(Icons.delete_outline_rounded),
+                leading: const HugeIcon(icon: HugeIcons.strokeRoundedDelete02),
                 title: Text(removeLabel),
                 onTap: () {
                   Navigator.of(sheetContext).pop();
@@ -679,10 +680,10 @@ class _HomeSearchState extends State<_HomeSearch> {
               ),
               for (final entry in SettingsService.searchEngineLabel.entries)
                 ListTile(
-                  leading: const Icon(Icons.search_rounded),
+                  leading: const HugeIcon(icon: HugeIcons.strokeRoundedSearch01),
                   title: Text(entry.value),
                   trailing: _settings.searchEngine == entry.key
-                      ? Icon(Icons.check_rounded, color: AppColors.forestAccent)
+                      ? HugeIcon(icon: HugeIcons.strokeRoundedTick02, color: AppColors.forestAccent)
                       : null,
                   onTap: () => Navigator.of(sheetContext).pop(entry.key),
                 ),
@@ -696,7 +697,7 @@ class _HomeSearchState extends State<_HomeSearch> {
   }
 
   Widget _barAction({
-    required IconData icon,
+    required List<List<dynamic>> icon,
     required String tooltip,
     required VoidCallback onTap,
     Color? color,
@@ -707,7 +708,7 @@ class _HomeSearchState extends State<_HomeSearch> {
       visualDensity: VisualDensity.compact,
       constraints: const BoxConstraints.tightFor(width: 40, height: 40),
       padding: EdgeInsets.zero,
-      icon: Icon(icon, size: 19, color: color ?? AppColors.forestMuted),
+      icon: HugeIcon(icon: icon, size: 19, color: color ?? AppColors.forestMuted),
     );
   }
 
@@ -744,8 +745,8 @@ class _HomeSearchState extends State<_HomeSearch> {
           child: Row(
             children: [
               const SizedBox(width: 16),
-              Icon(
-                Icons.search_rounded,
+              HugeIcon(icon: 
+                HugeIcons.strokeRoundedSearch01,
                 color: focused ? accent : AppColors.forestMuted,
                 size: 21,
               ),
@@ -772,7 +773,7 @@ class _HomeSearchState extends State<_HomeSearch> {
               ),
               if (hasText)
                 _barAction(
-                  icon: Icons.close_rounded,
+                  icon: HugeIcons.strokeRoundedCancel01,
                   tooltip: 'Clear search',
                   onTap: () {
                     _controller.clear();
@@ -781,8 +782,8 @@ class _HomeSearchState extends State<_HomeSearch> {
                 ),
               _barAction(
                 icon: _listening
-                    ? Icons.stop_circle_rounded
-                    : Icons.mic_none_rounded,
+                    ? HugeIcons.strokeRoundedStopCircle
+                    : HugeIcons.strokeRoundedMic01,
                 tooltip: _listening ? 'Stop voice search' : 'Voice search',
                 color: _listening ? accent : null,
                 onTap: _toggleVoice,
@@ -814,8 +815,8 @@ class _HomeSearchState extends State<_HomeSearch> {
                     onTap: _submit,
                     child: const Tooltip(
                       message: 'Search',
-                      child: Icon(
-                        Icons.arrow_forward_rounded,
+                      child: HugeIcon(icon: 
+                        HugeIcons.strokeRoundedArrowRight01,
                         color: Colors.white,
                         size: 20,
                       ),
@@ -846,7 +847,7 @@ class _HomeSearchState extends State<_HomeSearch> {
                 minimumSize: const Size(0, 40),
                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
-              icon: const Icon(Icons.content_paste_rounded, size: 15),
+              icon: const HugeIcon(icon: HugeIcons.strokeRoundedClipboard, size: 15),
               label: Text(
                 'Paste',
                 style: AppText.body(12, color: AppColors.forestMuted),
@@ -864,8 +865,8 @@ class _HomeSearchState extends State<_HomeSearch> {
                 padding:
                     const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
               ),
-              icon: Icon(
-                Icons.public_rounded,
+              icon: HugeIcon(icon: 
+                HugeIcons.strokeRoundedGlobe,
                 size: 15,
                 color: AppColors.forestAccent,
               ),
@@ -911,13 +912,13 @@ class _HomeSearchState extends State<_HomeSearch> {
                       const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                   child: Row(
                     children: [
-                      Icon(
+                      HugeIcon(icon: 
                         suggestion.source == 'Bookmark'
-                            ? Icons.bookmark_outline_rounded
+                            ? HugeIcons.strokeRoundedBookmark02
                             : suggestion.source == 'Recent' ||
                                     suggestion.source == 'History'
-                                ? Icons.history_rounded
-                                : Icons.public_rounded,
+                                ? HugeIcons.strokeRoundedHistory
+                                : HugeIcons.strokeRoundedGlobe,
                         size: 17,
                         color: AppColors.forestAccent,
                       ),
@@ -938,14 +939,14 @@ class _HomeSearchState extends State<_HomeSearch> {
                               suggestion.url,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: AppText.body(10,
+                              style: AppText.body(11,
                                   color: AppColors.forestMuted),
                             ),
                           ],
                         ),
                       ),
-                      Icon(
-                        Icons.north_west_rounded,
+                      HugeIcon(icon: 
+                        HugeIcons.strokeRoundedArrowUpLeft01,
                         size: 14,
                         color: AppColors.forestMuted.withValues(alpha: 0.7),
                       ),

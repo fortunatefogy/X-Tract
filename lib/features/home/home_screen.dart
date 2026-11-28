@@ -1,3 +1,4 @@
+import 'package:hugeicons/hugeicons.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -372,14 +373,14 @@ class _HomeScreenState extends State<HomeScreen> {
       statusKey = 'loading';
       status = const _StatusPill(
         color: AppColors.teal,
-        icon: Icons.autorenew_rounded,
+        icon: HugeIcons.strokeRoundedRefresh,
         message: 'Scanning page for media…',
       );
     } else if (_media.isNotEmpty) {
       statusKey = 'detected';
       status = _StatusPill(
         color: AppColors.teal,
-        icon: Icons.check_circle_rounded,
+        icon: HugeIcons.strokeRoundedCheckmarkCircle02,
         message:
             'Link detected · ${groups.length} media item${groups.length == 1 ? '' : 's'}',
         actionLabel: 'CLEAR',
@@ -389,7 +390,7 @@ class _HomeScreenState extends State<HomeScreen> {
       statusKey = 'error';
       status = _StatusPill(
         color: AppColors.amber,
-        icon: Icons.info_outline_rounded,
+        icon: HugeIcons.strokeRoundedInformationCircle,
         message: _error!,
       );
     }
@@ -423,7 +424,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     ),
                     RoundIconButton(
-                      icon: Icons.bookmark_border_rounded,
+                      icon: HugeIcons.strokeRoundedBookmark01,
                       tooltip: 'Bookmarks',
                       size: 44,
                       onPressed: () => Navigator.of(context).push(
@@ -463,7 +464,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   children: [
                     Expanded(
                       child: _QuickAction(
-                        icon: Icons.public_rounded,
+                        icon: HugeIcons.strokeRoundedGlobe,
                         label: 'Browser',
                         tint: AppColors.primarySoft,
                         foreground: AppColors.primarySoftForeground,
@@ -473,7 +474,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     const SizedBox(width: 10),
                     Expanded(
                       child: _QuickAction(
-                        icon: Icons.download_rounded,
+                        icon: HugeIcons.strokeRoundedDownload01,
                         label: 'Downloads',
                         tint: AppColors.tealSoft,
                         foreground: AppColors.tealDeep,
@@ -483,7 +484,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     const SizedBox(width: 10),
                     Expanded(
                       child: _QuickAction(
-                        icon: Icons.history_rounded,
+                        icon: HugeIcons.strokeRoundedHistory,
                         label: 'History',
                         tint: AppColors.amberSoft,
                         foreground: AppColors.amberDeep,
@@ -497,7 +498,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     const SizedBox(width: 10),
                     Expanded(
                       child: _QuickAction(
-                        icon: Icons.folder_rounded,
+                        icon: HugeIcons.strokeRoundedFolder02,
                         label: 'Library',
                         tint: AppColors.redSoft,
                         foreground: AppColors.redDeep,
@@ -555,7 +556,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ],
                 const SizedBox(height: 22),
                 _InfoPanel(
-                  icon: Icons.shield_outlined,
+                  icon: HugeIcons.strokeRoundedShield01,
                   message:
                       'Only public media the source makes accessible can be downloaded. Comet does not bypass logins, DRM, or access controls.',
                 ),
@@ -658,7 +659,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   _formatDuration(item.durationSeconds!),
               ];
               return ListTile(
-                leading: const Icon(Icons.audiotrack_rounded),
+                leading: const HugeIcon(icon: HugeIcons.strokeRoundedMusicNote01),
                 title: Text(
                   details.isEmpty ? 'Audio' : details.first,
                   maxLines: 1,
@@ -808,7 +809,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     isExpanded: true,
                     borderRadius: BorderRadius.circular(AppRadius.inner),
                     style: AppText.body(12, color: palette.foreground),
-                    icon: Icon(Icons.expand_more_rounded,
+                    icon: HugeIcon(icon: HugeIcons.strokeRoundedArrowDown01,
                         size: 18, color: palette.mutedForeground),
                     items: group.items
                         .map((option) => DropdownMenuItem<MediaItem>(
@@ -836,7 +837,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   alignment: Alignment.centerLeft,
                   child: TextButton.icon(
                     onPressed: () => _chooseAudioOnly(group),
-                    icon: const Icon(Icons.audiotrack_rounded, size: 16),
+                    icon: const HugeIcon(icon: HugeIcons.strokeRoundedMusicNote01, size: 16),
                     label: Text(audioOptions.length > 1
                         ? 'Audio only (${audioOptions.length} formats)'
                         : 'Download audio only'),
@@ -875,6 +876,7 @@ class _HomeScreenState extends State<HomeScreen> {
           cacheWidth: cacheWidth,
           filterQuality: FilterQuality.medium,
           fit: BoxFit.cover,
+          gaplessPlayback: true,
           errorBuilder: (_, __, ___) => _mediaIcon(item),
         ),
       );
@@ -889,14 +891,14 @@ class _HomeScreenState extends State<HomeScreen> {
           color: context.palette.muted,
           borderRadius: BorderRadius.circular(AppRadius.inner),
         ),
-        child: Icon(
+        child: HugeIcon(icon: 
           item.type == 'image'
-              ? Icons.image_outlined
+              ? HugeIcons.strokeRoundedImage01
               : item.type == 'audio'
-                  ? Icons.audiotrack_rounded
+                  ? HugeIcons.strokeRoundedMusicNote01
                   : item.type == 'document'
-                      ? Icons.description_outlined
-                      : Icons.movie_outlined,
+                      ? HugeIcons.strokeRoundedFile02
+                      : HugeIcons.strokeRoundedFilm01,
           color: context.palette.mutedForeground,
         ),
       );
@@ -929,7 +931,7 @@ class _QuickAction extends StatelessWidget {
     required this.onTap,
   });
 
-  final IconData icon;
+  final List<List<dynamic>> icon;
   final String label;
   final Color tint;
   final Color foreground;
@@ -950,7 +952,7 @@ class _QuickAction extends StatelessWidget {
               color: tint,
               borderRadius: BorderRadius.circular(11),
             ),
-            child: Icon(icon, size: 18, color: foreground),
+            child: HugeIcon(icon: icon, size: 18, color: foreground),
           ),
           const SizedBox(height: 9),
           Text(
@@ -1026,7 +1028,7 @@ class _HeroCard extends StatelessWidget {
               children: [
                 Text(
                   'SMART LINK SCAN',
-                  style: AppText.label(10,
+                  style: AppText.label(11,
                       color: Colors.white.withValues(alpha: 0.85)),
                 ),
                 const SizedBox(height: 8),
@@ -1044,7 +1046,7 @@ class _HeroCard extends StatelessWidget {
                   ),
                   child: Row(
                     children: [
-                      Icon(Icons.link_rounded,
+                      HugeIcon(icon: HugeIcons.strokeRoundedLink01,
                           size: 18, color: AppColors.primary),
                       const SizedBox(width: 10),
                       Expanded(
@@ -1114,7 +1116,7 @@ class _HeroCard extends StatelessWidget {
                               ),
                             )
                           else
-                            Icon(Icons.search_rounded,
+                            HugeIcon(icon: HugeIcons.strokeRoundedSearch01,
                                 size: 18, color: AppColors.primaryDeep),
                           const SizedBox(width: 8),
                           Text(
@@ -1147,7 +1149,7 @@ class _StatusPill extends StatelessWidget {
   });
 
   final Color color;
-  final IconData icon;
+  final List<List<dynamic>> icon;
   final String message;
   final String? actionLabel;
   final VoidCallback? onAction;
@@ -1171,7 +1173,7 @@ class _StatusPill extends StatelessWidget {
               color: color.withValues(alpha: 0.14),
               shape: BoxShape.circle,
             ),
-            child: Icon(icon, size: 16, color: color),
+            child: HugeIcon(icon: icon, size: 16, color: color),
           ),
           const SizedBox(width: 8),
           Expanded(
@@ -1192,7 +1194,7 @@ class _StatusPill extends StatelessWidget {
               ),
               child: Text(
                 actionLabel!,
-                style: AppText.label(10, color: palette.mutedForeground),
+                style: AppText.label(11, color: palette.mutedForeground),
               ),
             ),
         ],
@@ -1233,10 +1235,10 @@ class _SelectBox extends StatelessWidget {
             ),
           ),
           child: selected
-              ? const Icon(Icons.check_rounded, size: 16, color: Colors.white)
+              ? const HugeIcon(icon: HugeIcons.strokeRoundedTick02, size: 16, color: Colors.white)
               : enabled
                   ? null
-                  : Icon(Icons.lock_outline_rounded,
+                  : HugeIcon(icon: HugeIcons.strokeRoundedLock,
                       size: 13, color: palette.mutedForeground),
         ),
       ),
@@ -1291,7 +1293,7 @@ class _DownloadBar extends StatelessWidget {
                       ),
                       const SizedBox(height: 1),
                       Text('Ready to queue',
-                          style: AppText.body(10,
+                          style: AppText.body(11,
                               color: palette.mutedForeground)),
                     ],
                   ),
@@ -1306,7 +1308,7 @@ class _DownloadBar extends StatelessWidget {
                         child: CircularProgressIndicator(
                             strokeWidth: 2, color: Colors.white),
                       )
-                    : const Icon(Icons.download_rounded, size: 18),
+                    : const HugeIcon(icon: HugeIcons.strokeRoundedDownload01, size: 18),
                 label: const Text('Download'),
               ),
             ],
@@ -1324,7 +1326,11 @@ class _ActiveDownloadsCard extends StatelessWidget {
   Widget build(BuildContext context) => AnimatedBuilder(
         animation: DownloadService.instance,
         builder: (context, _) {
-          final active = DownloadService.instance.active;
+          final all = DownloadService.instance.records;
+          final active =
+              all.where((record) => record.state.isActive).toList(
+                    growable: false,
+                  );
           if (active.isEmpty) return const SizedBox.shrink();
           final palette = context.palette;
           final overall =
@@ -1349,7 +1355,7 @@ class _ActiveDownloadsCard extends StatelessWidget {
                                 AppText.heading(16, weight: FontWeight.w600)),
                       ),
                       Text(
-                        '${active.length} of ${DownloadService.instance.records.where((r) => !r.state.isFinal).length}',
+                        '${active.length} of ${all.where((r) => !r.state.isFinal).length}',
                         style: AppText.body(12,
                             weight: FontWeight.w700,
                             color: palette.accentForeground),
@@ -1436,7 +1442,7 @@ class _ProgressRing extends StatelessWidget {
 
 class _InfoPanel extends StatelessWidget {
   const _InfoPanel({required this.icon, required this.message});
-  final IconData icon;
+  final List<List<dynamic>> icon;
   final String message;
 
   @override
@@ -1452,7 +1458,7 @@ class _InfoPanel extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, size: 20, color: palette.mutedForeground),
+          HugeIcon(icon: icon, size: 20, color: palette.mutedForeground),
           const SizedBox(width: 10),
           Expanded(
             child: Text(message,

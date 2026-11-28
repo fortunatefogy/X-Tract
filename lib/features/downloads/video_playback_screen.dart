@@ -1,3 +1,4 @@
+import 'package:hugeicons/hugeicons.dart';
 import 'dart:async';
 import 'dart:io';
 
@@ -148,7 +149,7 @@ class _VideoPlaybackScreenState extends State<VideoPlaybackScreen> {
                     ? '${option.toInt()}x'
                     : '${option}x'),
                 trailing: option == _speed
-                    ? Icon(Icons.check_rounded, color: AppColors.primary)
+                    ? HugeIcon(icon: HugeIcons.strokeRoundedTick02, color: AppColors.primary)
                     : null,
                 onTap: () => Navigator.of(sheetContext).pop(option),
               ),
@@ -198,8 +199,8 @@ class _VideoPlaybackScreenState extends State<VideoPlaybackScreen> {
                     shape: BoxShape.circle,
                     border: Border.all(color: AppColors.forestBorder),
                   ),
-                  child: Icon(
-                    Icons.music_note_rounded,
+                  child: HugeIcon(icon: 
+                    HugeIcons.strokeRoundedMusicNote01,
                     size: 96,
                     color: AppColors.primary,
                   ),
@@ -266,7 +267,7 @@ class _VideoPlaybackScreenState extends State<VideoPlaybackScreen> {
                 Row(
                   children: [
                     _CircleButton(
-                      icon: Icons.arrow_back_rounded,
+                      icon: HugeIcons.strokeRoundedArrowLeft01,
                       onPressed: () => Navigator.of(context).maybePop(),
                     ),
                     const SizedBox(width: 12),
@@ -283,20 +284,20 @@ class _VideoPlaybackScreenState extends State<VideoPlaybackScreen> {
                       ),
                     ),
                     _CircleButton(
-                      icon: Icons.ios_share_rounded,
+                      icon: HugeIcons.strokeRoundedShare01,
                       onPressed: _share,
                     ),
                     if (!_isAudio) ...[
                       const SizedBox(width: 8),
                       _CircleButton(
                         icon: _fill
-                            ? Icons.fit_screen_rounded
-                            : Icons.aspect_ratio_rounded,
+                            ? HugeIcons.strokeRoundedExpand
+                            : HugeIcons.strokeRoundedAspectRatio,
                         onPressed: () => setState(() => _fill = !_fill),
                       ),
                       const SizedBox(width: 8),
                       _CircleButton(
-                        icon: Icons.picture_in_picture_alt_rounded,
+                        icon: HugeIcons.strokeRoundedPictureInPicture,
                         onPressed: _enterPip,
                       ),
                     ],
@@ -308,7 +309,7 @@ class _VideoPlaybackScreenState extends State<VideoPlaybackScreen> {
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       _CircleButton(
-                        icon: Icons.replay_10_rounded,
+                        icon: HugeIcons.strokeRoundedGoBackward10Sec,
                         size: 48,
                         onPressed: () => _controller.seekTo(
                           value.position - const Duration(seconds: 10),
@@ -326,10 +327,10 @@ class _VideoPlaybackScreenState extends State<VideoPlaybackScreen> {
                             color: AppColors.primary,
                             shape: BoxShape.circle,
                           ),
-                          child: Icon(
+                          child: HugeIcon(icon: 
                             value.isPlaying
-                                ? Icons.pause_rounded
-                                : Icons.play_arrow_rounded,
+                                ? HugeIcons.strokeRoundedPause
+                                : HugeIcons.strokeRoundedPlay,
                             size: 38,
                             color: Colors.white,
                           ),
@@ -337,7 +338,7 @@ class _VideoPlaybackScreenState extends State<VideoPlaybackScreen> {
                       ),
                       const SizedBox(width: 20),
                       _CircleButton(
-                        icon: Icons.forward_10_rounded,
+                        icon: HugeIcons.strokeRoundedGoForward10Sec,
                         size: 48,
                         onPressed: () => _controller.seekTo(
                           value.position + const Duration(seconds: 10),
@@ -392,7 +393,7 @@ class _VideoPlaybackScreenState extends State<VideoPlaybackScreen> {
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       _Pill(
-                        icon: Icons.speed_rounded,
+                        icon: HugeIcons.strokeRoundedGauge,
                         label: _speed == _speed.roundToDouble()
                             ? '${_speed.toInt()}x'
                             : '${_speed}x',
@@ -402,8 +403,8 @@ class _VideoPlaybackScreenState extends State<VideoPlaybackScreen> {
                         const SizedBox(width: 10),
                         _Pill(
                           icon: _fill
-                              ? Icons.fit_screen_rounded
-                              : Icons.aspect_ratio_rounded,
+                              ? HugeIcons.strokeRoundedExpand
+                              : HugeIcons.strokeRoundedAspectRatio,
                           label: _fill ? 'Fill' : 'Fit',
                           onTap: () => setState(() => _fill = !_fill),
                         ),
@@ -428,7 +429,7 @@ class _CircleButton extends StatelessWidget {
     this.size = 40,
   });
 
-  final IconData icon;
+  final List<List<dynamic>> icon;
   final VoidCallback onPressed;
   final double size;
 
@@ -445,7 +446,7 @@ class _CircleButton extends StatelessWidget {
           child: InkWell(
             onTap: onPressed,
             child: Center(
-              child: Icon(icon, size: size * 0.45, color: AppColors.forestText),
+              child: HugeIcon(icon: icon, size: size * 0.45, color: AppColors.forestText),
             ),
           ),
         ),
@@ -459,7 +460,7 @@ class _Pill extends StatelessWidget {
     required this.onTap,
   });
 
-  final IconData icon;
+  final List<List<dynamic>> icon;
   final String label;
   final VoidCallback onTap;
 
@@ -481,7 +482,7 @@ class _Pill extends StatelessWidget {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(icon, size: 16, color: AppColors.forestText),
+                  HugeIcon(icon: icon, size: 16, color: AppColors.forestText),
                   const SizedBox(width: 6),
                   Text(label,
                       style: AppText.body(12,

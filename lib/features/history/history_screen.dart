@@ -1,3 +1,6 @@
+import 'package:hugeicons/hugeicons.dart';
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -15,15 +18,28 @@ class HistoryScreen extends StatefulWidget {
 
 class _HistoryScreenState extends State<HistoryScreen> {
   final _searchController = TextEditingController();
+  Timer? _searchDebounce;
+  String _query = '';
 
   @override
   void initState() {
     super.initState();
-    _searchController.addListener(() => setState(() {}));
+    _searchController.addListener(_onSearchChanged);
+  }
+
+  void _onSearchChanged() {
+    final value = _searchController.text.trim().toLowerCase();
+    if (value == _query) return;
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 180), () {
+      if (!mounted || value == _query) return;
+      setState(() => _query = value);
+    });
   }
 
   @override
   void dispose() {
+    _searchDebounce?.cancel();
     _searchController.dispose();
     super.dispose();
   }
@@ -69,7 +85,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
         child: ListenableBuilder(
           listenable: service,
           builder: (context, _) {
-            final query = _searchController.text.trim().toLowerCase();
+            final query = _query;
             final entries = service.entries
                 .where((entry) =>
                     query.isEmpty ||
@@ -81,7 +97,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   RoundIconButton(
-                    icon: Icons.arrow_back_rounded,
+                    icon: HugeIcons.strokeRoundedArrowLeft01,
                     tooltip: 'Back',
                     size: 40,
                     onPressed: () => Navigator.of(context).maybePop(),
@@ -105,7 +121,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                     ),
                   ),
                   RoundIconButton(
-                    icon: Icons.delete_sweep_outlined,
+                    icon: HugeIcons.strokeRoundedDelete02,
                     tooltip: 'Clear history',
                     color: palette.destructive,
                     onPressed: service.entries.isEmpty ? null : _clear,
@@ -118,7 +134,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                 textInputAction: TextInputAction.search,
                 decoration: InputDecoration(
                   hintText: 'Search history',
-                  prefixIcon: Icon(Icons.search_rounded,
+                  prefixIcon: HugeIcon(icon: HugeIcons.strokeRoundedSearch01,
                       size: 20, color: palette.mutedForeground),
                 ),
               ),
@@ -128,8 +144,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
                   padding: const EdgeInsets.only(top: 24),
                   child: EmptyState(
                     icon: query.isEmpty
-                        ? Icons.history_rounded
-                        : Icons.search_off_rounded,
+                        ? HugeIcons.strokeRoundedHistory
+                        : HugeIcons.strokeRoundedSearchRemove,
                     title: query.isEmpty ? 'No history yet' : 'No matches',
                     message: query.isEmpty
                         ? 'Pages you open in the Comet browser appear here.'
@@ -228,7 +244,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                   ),
                 );
               },
-              icon: Icon(Icons.close_rounded,
+              icon: HugeIcon(icon: HugeIcons.strokeRoundedCancel01,
                   size: 18, color: palette.mutedForeground),
             ),
           ],
@@ -248,7 +264,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
         borderRadius: BorderRadius.circular(AppRadius.inner),
       ),
       child:
-          Icon(Icons.public_rounded, size: 22, color: palette.accentForeground),
+          HugeIcon(icon: HugeIcons.strokeRoundedGlobe, size: 22, color: palette.accentForeground),
     );
     if (thumbnail == null || thumbnail.isEmpty) return fallback;
     return ClipRRect(
@@ -260,6 +276,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
         cacheWidth: (52 * MediaQuery.devicePixelRatioOf(context)).round(),
         filterQuality: FilterQuality.medium,
         fit: BoxFit.cover,
+        gaplessPlayback: true,
         errorBuilder: (_, __, ___) => fallback,
       ),
     );

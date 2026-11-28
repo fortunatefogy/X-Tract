@@ -2,11 +2,16 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:hugeicons/hugeicons.dart';
 import 'package:linky/features/library/folder_picker.dart';
 import 'package:linky/theme/app_theme.dart';
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
 
 import 'test_support/fake_path_provider.dart';
+
+Finder hugeIcon(List<List<dynamic>> icon) => find.byWidgetPredicate(
+      (widget) => widget is HugeIcon && widget.icon == icon,
+    );
 
 void main() {
   late Directory temp;
@@ -38,7 +43,7 @@ void main() {
 
     expect(find.text('Save to'), findsOneWidget);
     expect(find.text('Library (root)'), findsOneWidget);
-    expect(find.byIcon(Icons.expand_more_rounded), findsOneWidget);
+    expect(hugeIcon(HugeIcons.strokeRoundedArrowDown01), findsOneWidget);
   });
 
   testWidgets('folder selector opens a dropdown menu', (tester) async {
@@ -60,7 +65,7 @@ void main() {
 
     expect(find.text('New folder'), findsOneWidget);
     expect(find.text('Library (root)'), findsNWidgets(2));
-    expect(find.byIcon(Icons.create_new_folder_outlined), findsOneWidget);
-    expect(find.byIcon(Icons.check_rounded), findsOneWidget);
+    expect(hugeIcon(HugeIcons.strokeRoundedFolderAdd), findsOneWidget);
+    expect(hugeIcon(HugeIcons.strokeRoundedTick02), findsOneWidget);
   });
 }

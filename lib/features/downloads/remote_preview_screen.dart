@@ -1,3 +1,4 @@
+import 'package:hugeicons/hugeicons.dart';
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
@@ -75,7 +76,7 @@ class _RemotePreviewScreenState extends State<RemotePreviewScreen> {
         actions: [
           PopupMenuButton<double>(
             tooltip: 'Playback speed',
-            icon: const Icon(Icons.speed),
+            icon: const HugeIcon(icon: HugeIcons.strokeRoundedGauge),
             initialValue: _speed,
             onSelected: (speed) {
               setState(() => _speed = speed);
@@ -94,7 +95,7 @@ class _RemotePreviewScreenState extends State<RemotePreviewScreen> {
           IconButton(
             tooltip: _fill ? 'Fit video' : 'Fill screen',
             onPressed: () => setState(() => _fill = !_fill),
-            icon: Icon(_fill ? Icons.fit_screen : Icons.aspect_ratio),
+            icon: HugeIcon(icon: _fill ? HugeIcons.strokeRoundedExpand : HugeIcons.strokeRoundedAspectRatio),
           ),
         ],
       ),
@@ -144,10 +145,10 @@ class _RemotePreviewScreenState extends State<RemotePreviewScreen> {
                             onPressed: () => value.isPlaying
                                 ? _controller.pause()
                                 : _controller.play(),
-                            icon: Icon(
+                            icon: HugeIcon(icon: 
                               value.isPlaying
-                                  ? Icons.pause
-                                  : Icons.play_arrow,
+                                  ? HugeIcons.strokeRoundedPause
+                                  : HugeIcons.strokeRoundedPlay,
                             ),
                           ),
                           Text(

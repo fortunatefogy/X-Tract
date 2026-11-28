@@ -1,3 +1,4 @@
+import 'package:hugeicons/hugeicons.dart';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -152,10 +153,10 @@ class _LibraryMediaViewerState extends State<LibraryMediaViewer>
     return '';
   }
 
-  IconData get _primaryIcon {
-    if (_type == 'video') return Icons.play_arrow_rounded;
-    if (_type == 'audio') return Icons.play_arrow_rounded;
-    return Icons.open_in_new_rounded;
+  List<List<dynamic>> get _primaryIcon {
+    if (_type == 'video') return HugeIcons.strokeRoundedPlay;
+    if (_type == 'audio') return HugeIcons.strokeRoundedPlay;
+    return HugeIcons.strokeRoundedArrowUpRight01;
   }
 
   @override
@@ -188,12 +189,12 @@ class _LibraryMediaViewerState extends State<LibraryMediaViewer>
           IconButton(
             tooltip: 'Share',
             onPressed: _share,
-            icon: const Icon(Icons.share_rounded),
+            icon: const HugeIcon(icon: HugeIcons.strokeRoundedShare01),
           ),
           IconButton(
             tooltip: 'Open with',
             onPressed: _openWith,
-            icon: const Icon(Icons.open_in_new_rounded),
+            icon: const HugeIcon(icon: HugeIcons.strokeRoundedArrowUpRight01),
           ),
         ],
       ),
@@ -222,7 +223,7 @@ class _LibraryMediaViewerState extends State<LibraryMediaViewer>
                 child: Center(
                   child: FilledButton.icon(
                     onPressed: _primaryAction,
-                    icon: Icon(_primaryIcon, size: 18),
+                    icon: HugeIcon(icon: _primaryIcon, size: 18),
                     label: Text(_primaryLabel),
                   ),
                 ),
@@ -237,13 +238,19 @@ class _LibraryMediaViewerState extends State<LibraryMediaViewer>
     final name = file.uri.pathSegments.last;
     switch (type) {
       case 'image':
+        final decodeWidth =
+            (MediaQuery.sizeOf(context).width *
+                    MediaQuery.devicePixelRatioOf(context))
+                .round();
         return Center(
           child: InteractiveViewer(
             child: Image.file(
               file,
               fit: BoxFit.contain,
+              cacheWidth: decodeWidth,
+              gaplessPlayback: true,
               errorBuilder: (_, __, ___) => _info(
-                icon: Icons.broken_image_outlined,
+                icon: HugeIcons.strokeRoundedImageNotFound01,
                 name: name,
               ),
             ),
@@ -277,7 +284,7 @@ class _LibraryMediaViewerState extends State<LibraryMediaViewer>
                   children: [
                     VideoPlayer(controller),
                     if (!controller.value.isPlaying)
-                      const Icon(Icons.play_circle_fill_rounded,
+                      const HugeIcon(icon: HugeIcons.strokeRoundedPlayCircle02,
                           size: 72, color: Colors.white70),
                   ],
                 ),
@@ -295,7 +302,7 @@ class _LibraryMediaViewerState extends State<LibraryMediaViewer>
                 type: 'video',
                 file: file,
                 size: size,
-                fallback: const Icon(Icons.movie_outlined,
+                fallback: const HugeIcon(icon: HugeIcons.strokeRoundedFilm01,
                     size: 64, color: Colors.white38),
               ),
               if (isCurrent)
@@ -308,20 +315,20 @@ class _LibraryMediaViewerState extends State<LibraryMediaViewer>
                   ),
                 )
               else
-                const Icon(Icons.play_circle_fill_rounded,
+                const HugeIcon(icon: HugeIcons.strokeRoundedPlayCircle02,
                     size: 72, color: Colors.white70),
             ],
           ),
         );
       case 'audio':
         return _info(
-          icon: Icons.music_note_rounded,
+          icon: HugeIcons.strokeRoundedMusicNote01,
           name: name,
           subtitle: 'Audio',
         );
       default:
         return _info(
-          icon: Icons.insert_drive_file_outlined,
+          icon: HugeIcons.strokeRoundedFile02,
           name: name,
           subtitle: 'Document',
         );
@@ -329,7 +336,7 @@ class _LibraryMediaViewerState extends State<LibraryMediaViewer>
   }
 
   Widget _info({
-    required IconData icon,
+    required List<List<dynamic>> icon,
     required String name,
     String? subtitle,
   }) {
@@ -346,7 +353,7 @@ class _LibraryMediaViewerState extends State<LibraryMediaViewer>
                 color: Color(0xFF1C1F2A),
                 shape: BoxShape.circle,
               ),
-              child: Icon(icon, size: 56, color: Colors.white70),
+              child: HugeIcon(icon: icon, size: 56, color: Colors.white70),
             ),
             const SizedBox(height: 20),
             Text(

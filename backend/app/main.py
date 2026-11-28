@@ -159,7 +159,7 @@ async def health() -> dict[str, str]:
 
 @app.post("/api/extract")
 async def extract(request: ExtractRequest) -> dict:
-    url = validate_public_url(request.url)
+    url = await run_in_threadpool(validate_public_url, request.url)
     media: dict[str, dict] = {}
     direct_type = classify(url)
     if direct_type:
@@ -183,10 +183,14 @@ async def extract(request: ExtractRequest) -> dict:
         ) as client:
             current_url = url
             for _ in range(6):
-                validate_public_url(current_url)
-                response = await client.get(current_url)
+                await run_in_threadpool(validate_public_url, current_url)
+                response = await client.send(
+                    client.build_request("GET", current_url),
+                    stream=True,
+                )
                 if response.is_redirect:
                     location = response.headers.get("location")
+                    await response.aclose()
                     if not location:
                         raise HTTPException(422, "The webpage returned an invalid redirect.")
                     current_url = urljoin(str(response.url), location)
@@ -195,33 +199,46 @@ async def extract(request: ExtractRequest) -> dict:
                 break
             else:
                 raise HTTPException(422, "The webpage redirected too many times.")
+
+            final_url = str(response.url)
+            content_type = response.headers.get("content-type", "")
+            if classify(final_url, content_type):
+                await response.aclose()
+                media[final_url] = {
+                    "url": final_url,
+                    "type": classify(final_url, content_type),
+                    "source_page": url,
+                }
+            elif "html" in content_type.lower():
+                body_bytes = bytearray()
+                async for chunk in response.aiter_bytes():
+                    remaining = MAX_PAGE_BYTES - len(body_bytes)
+                    if remaining <= 0:
+                        break
+                    body_bytes.extend(chunk[:remaining])
+                    if len(chunk) > remaining:
+                        break
+                await response.aclose()
+                try:
+                    encoding = response.encoding or "utf-8"
+                except Exception:
+                    encoding = "utf-8"
+                body = bytes(body_bytes).decode(encoding, errors="ignore")
+                for match in URL_RE.finditer(body):
+                    candidate = urljoin(final_url, match.group(1).replace("&amp;", "&"))
+                    kind = classify(candidate)
+                    if kind and urlparse(candidate).scheme in {"http", "https"}:
+                        media.setdefault(candidate, {"url": candidate, "type": kind, "source_page": url})
+                # Include Open Graph media URLs and common video/source tags by explicit patterns.
+                for match in re.finditer(r'''<meta[^>]+(?:property|name)=["'](?:og:image|og:video|twitter:image|twitter:player:stream)["'][^>]+content=["']([^"']+)''', body, re.I):
+                    candidate = urljoin(final_url, match.group(1).replace("&amp;", "&"))
+                    kind = classify(candidate)
+                    if kind:
+                        media.setdefault(candidate, {"url": candidate, "type": kind, "source_page": url})
+            else:
+                await response.aclose()
     except httpx.HTTPError as exc:
         raise HTTPException(422, f"Could not read the public webpage: {exc.__class__.__name__}")
-    content_type = response.headers.get("content-type", "")
-    if classify(str(response.url), content_type):
-        final_url = str(response.url)
-        media[final_url] = {"url": final_url, "type": classify(final_url, content_type), "source_page": url}
-    elif "html" in content_type.lower():
-        body_bytes = bytearray()
-        async for chunk in response.aiter_bytes():
-            remaining = MAX_PAGE_BYTES - len(body_bytes)
-            if remaining <= 0:
-                break
-            body_bytes.extend(chunk[:remaining])
-            if len(chunk) > remaining:
-                break
-        body = bytes(body_bytes).decode(response.encoding or "utf-8", errors="ignore")
-        for match in URL_RE.finditer(body):
-            candidate = urljoin(str(response.url), match.group(1).replace("&amp;", "&"))
-            kind = classify(candidate)
-            if kind and urlparse(candidate).scheme in {"http", "https"}:
-                media.setdefault(candidate, {"url": candidate, "type": kind, "source_page": url})
-        # Include Open Graph media URLs and common video/source tags by explicit patterns.
-        for match in re.finditer(r'''<meta[^>]+(?:property|name)=["'](?:og:image|og:video|twitter:image|twitter:player:stream)["'][^>]+content=["']([^"']+)''', body, re.I):
-            candidate = urljoin(str(response.url), match.group(1).replace("&amp;", "&"))
-            kind = classify(candidate)
-            if kind:
-                media.setdefault(candidate, {"url": candidate, "type": kind, "source_page": url})
     return {"media": list(media.values())[:100], "source": "generic"}
 
 
@@ -231,7 +248,7 @@ async def publish(request: PublishRequest) -> dict:
     chat_id = request.chat_id or os.getenv("TELEGRAM_DEFAULT_CHAT_ID")
     if not token or not chat_id:
         raise HTTPException(503, "Telegram publishing is not configured on the backend.")
-    media_url = validate_public_url(request.media_url)
+    media_url = await run_in_threadpool(validate_public_url, request.media_url)
     media_type = classify(media_url)
     method = "sendPhoto" if media_type == "image" else "sendVideo" if media_type == "video" else None
     if not method:

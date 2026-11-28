@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'downloader_utils.dart';
 import 'proxy_service.dart';
 import 'secure_dns_service.dart';
 import 'dart:math';
@@ -179,7 +180,7 @@ class DashDownloader {
         videoFile = await _downloadRepresentation(
           client: client,
           representation: video,
-          destination: File('${_stem(destination.path)}.mp4'),
+          destination: File('${pathStem(destination.path)}.mp4'),
           workDirectory: Directory(
             '${workDirectory.path}${Platform.pathSeparator}video',
           ),
@@ -195,7 +196,7 @@ class DashDownloader {
         audioFile = await _downloadRepresentation(
           client: client,
           representation: audio,
-          destination: File('${_stem(destination.path)}.m4a'),
+          destination: File('${pathStem(destination.path)}.m4a'),
           workDirectory: Directory(
             '${workDirectory.path}${Platform.pathSeparator}audio',
           ),
@@ -207,7 +208,7 @@ class DashDownloader {
         audioFile = await _downloadRepresentation(
           client: client,
           representation: audio,
-          destination: File('${_stem(destination.path)}.m4a'),
+          destination: File('${pathStem(destination.path)}.m4a'),
           workDirectory: Directory(
             '${workDirectory.path}${Platform.pathSeparator}audio',
           ),
@@ -219,7 +220,7 @@ class DashDownloader {
       File output = videoFile ?? audioFile!;
       String? warning;
       if (videoFile != null && audioFile != null) {
-        final muxedPath = '${_stem(destination.path)}.mp4';
+        final muxedPath = '${pathStem(destination.path)}.mp4';
         final muxed = await DeviceResources.instance.muxMedia(
           videoFile.path,
           audioFile.path,
@@ -227,12 +228,12 @@ class DashDownloader {
         );
         if (muxed != null && await File(muxed).exists()) {
           output = File(muxed);
-          await _deleteQuietly(videoFile);
-          await _deleteQuietly(audioFile);
+          await deleteQuietly(videoFile);
+          await deleteQuietly(audioFile);
         } else {
           warning =
               'The separate audio track could not be merged; saved the video track only.';
-          await _deleteQuietly(audioFile);
+          await deleteQuietly(audioFile);
         }
       }
       final chosen = video ?? audio!;
@@ -484,8 +485,8 @@ class DashDownloader {
     final merged = await _mergeLiveParts(
       workDirectory: workDirectory,
       destination: destination,
-      videoInit: videoInit.existsSync() ? videoInit : null,
-      audioInit: audioInit.existsSync() ? audioInit : null,
+      videoInit: (await videoInit.exists()) ? videoInit : null,
+      audioInit: (await audioInit.exists()) ? audioInit : null,
       includeVideo: !audioOnly || audioIndex == 0,
     );
     try {
@@ -572,10 +573,10 @@ class DashDownloader {
     await file.writeAsBytes(data, flush: true);
   }
 
-  List<File> _liveParts(Directory directory, String prefix) {
+  Future<List<File>> _liveParts(Directory directory, String prefix) async {
     final files = <File>[];
     try {
-      for (final entity in directory.listSync()) {
+      await for (final entity in directory.list()) {
         if (entity is! File) continue;
         final name = entity.uri.pathSegments.last;
         if (name.startsWith('live-$prefix-') && name.endsWith('.m4s')) {
@@ -622,8 +623,8 @@ class DashDownloader {
     required File? audioInit,
     required bool includeVideo,
   }) async {
-    final videoParts = _liveParts(workDirectory, 'v');
-    final audioParts = _liveParts(workDirectory, 'a');
+    final videoParts = await _liveParts(workDirectory, 'v');
+    final audioParts = await _liveParts(workDirectory, 'a');
     File? videoFile;
     File? audioFile;
     String? warning;
@@ -651,7 +652,7 @@ class DashDownloader {
     }
 
     if (videoFile != null && audioFile != null) {
-      final muxedPath = '${_stem(destination.path)}.mp4';
+      final muxedPath = '${pathStem(destination.path)}.mp4';
       final muxed = await DeviceResources.instance
           .muxMedia(videoFile.path, audioFile.path, muxedPath);
       if (muxed != null && await File(muxed).exists()) {
@@ -663,10 +664,10 @@ class DashDownloader {
 
     final source = videoFile ?? audioFile!;
     final target = File(
-      '${_stem(destination.path)}.${videoFile != null ? 'mp4' : 'm4a'}',
+      '${pathStem(destination.path)}.${videoFile != null ? 'mp4' : 'm4a'}',
     );
     await target.parent.create(recursive: true);
-    await _deleteQuietly(target);
+    await deleteQuietly(target);
     await source.rename(target.path);
     return (target, warning);
   }
@@ -1073,7 +1074,7 @@ class DashDownloader {
       final (response, _) =
           await _get(client, representation.singleFile!, headers);
       if (response.statusCode < 200 || response.statusCode >= 300) {
-        await _discard(response);
+        await discardResponse(response);
         throw HttpException(
           'The DASH server returned HTTP ${response.statusCode}.',
         );
@@ -1092,35 +1093,14 @@ class DashDownloader {
         try {
           await sink.close();
         } catch (_) {}
-        await _deleteQuietly(temporary);
+        await deleteQuietly(temporary);
         rethrow;
       }
       return destination;
     }
 
     await workDirectory.create(recursive: true);
-    final completedFile = File(
-      '${workDirectory.path}${Platform.pathSeparator}completed.json',
-    );
     final completed = <int>{};
-    if (await completedFile.exists()) {
-      try {
-        final raw = jsonDecode(await completedFile.readAsString());
-        if (raw is List) {
-          completed.addAll(raw.whereType<num>().map((value) => value.toInt()));
-        }
-      } catch (_) {}
-    }
-    var saveChain = Future<void>.value();
-    Future<void> saveCompleted() {
-      final snapshot = completed.toList()..sort();
-      saveChain = saveChain.then((_) async {
-        final temporary = File('${completedFile.path}.tmp');
-        await temporary.writeAsString(jsonEncode(snapshot), flush: true);
-        await temporary.rename(completedFile.path);
-      }).catchError((_) {});
-      return saveChain;
-    }
 
     final initFile =
         File('${workDirectory.path}${Platform.pathSeparator}init.mp4');
@@ -1138,10 +1118,8 @@ class DashDownloader {
       final existing = File(
         '${workDirectory.path}${Platform.pathSeparator}seg-$index.m4s',
       );
-      if (existing.existsSync() && existing.lengthSync() > 0) {
+      if (await existing.exists() && await existing.length() > 0) {
         completed.add(index);
-      } else {
-        completed.remove(index);
       }
     }
     var next = 0;
@@ -1178,7 +1156,6 @@ class DashDownloader {
             }
           }
           completed.add(index);
-          await saveCompleted();
           onProgress(completed.length, representation.segments.length);
         }
       }),
@@ -1208,7 +1185,7 @@ class DashDownloader {
       try {
         await sink.close();
       } catch (_) {}
-      await _deleteQuietly(temporary);
+      await deleteQuietly(temporary);
       rethrow;
     }
     try {
@@ -1240,7 +1217,7 @@ class DashDownloader {
       range: range == null ? null : 'bytes=${range.$1}-${range.$2}',
     );
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      await _discard(response);
+      await discardResponse(response);
       throw HttpException(
           'The DASH server returned HTTP ${response.statusCode}.');
     }
@@ -1256,42 +1233,16 @@ class DashDownloader {
     Uri uri,
     Map<String, String> headers, {
     String? range,
-  }) async {
-    var current = uri;
-    for (var redirects = 0;; redirects++) {
-      final request = await client.getUrl(current);
-      request.followRedirects = false;
-      if (current.origin == uri.origin) {
-        headers.forEach(request.headers.set);
-      }
-      if (range != null) request.headers.set(HttpHeaders.rangeHeader, range);
-      final response = await request.close();
-      if (!response.isRedirect) return (response, current);
-      if (redirects >= 5) {
-        await _discard(response);
-        throw const HttpException(
-            'The DASH manifest redirected too many times.');
-      }
-      final location = response.headers.value(HttpHeaders.locationHeader);
-      await _discard(response);
-      if (location == null) throw const HttpException('Invalid DASH redirect.');
-      current = current.resolve(location);
-      if (!{'http', 'https'}.contains(current.scheme)) {
-        throw const HttpException('Unsupported DASH redirect.');
-      }
-    }
-  }
-
-  Future<void> _discard(HttpClientResponse response) async {
-    try {
-      final socket = await response.detachSocket();
-      socket.destroy();
-    } catch (_) {
-      try {
-        await response.drain<void>();
-      } catch (_) {}
-    }
-  }
+  }) =>
+      openFollowingRedirects(
+        client,
+        uri,
+        headers,
+        range: range,
+        redirectLimitMessage: 'The DASH manifest redirected too many times.',
+        invalidRedirectMessage: 'Invalid DASH redirect.',
+        unsupportedRedirectMessage: 'Unsupported DASH redirect.',
+      );
 
   Uri _applyBaseUrl(Uri base, XmlElement element) {
     final node = _firstChild(element, 'BaseURL');
@@ -1312,16 +1263,6 @@ class DashDownloader {
           if (child.name.local == name) child,
       ];
 
-  String _stem(String path) {
-    final dot = path.lastIndexOf('.');
-    return dot > 0 ? path.substring(0, dot) : path;
-  }
-
-  Future<void> _deleteQuietly(File file) async {
-    try {
-      if (await file.exists()) await file.delete();
-    } catch (_) {}
-  }
 }
 
 class _LiveTiming {

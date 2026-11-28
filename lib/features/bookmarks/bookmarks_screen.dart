@@ -1,3 +1,6 @@
+import 'package:hugeicons/hugeicons.dart';
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -15,15 +18,28 @@ class BookmarksScreen extends StatefulWidget {
 
 class _BookmarksScreenState extends State<BookmarksScreen> {
   final _searchController = TextEditingController();
+  Timer? _searchDebounce;
+  String _query = '';
 
   @override
   void initState() {
     super.initState();
-    _searchController.addListener(() => setState(() {}));
+    _searchController.addListener(_onSearchChanged);
+  }
+
+  void _onSearchChanged() {
+    final value = _searchController.text.trim().toLowerCase();
+    if (value == _query) return;
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 180), () {
+      if (!mounted || value == _query) return;
+      setState(() => _query = value);
+    });
   }
 
   @override
   void dispose() {
+    _searchDebounce?.cancel();
     _searchController.dispose();
     super.dispose();
   }
@@ -58,7 +74,7 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
         child: ListenableBuilder(
           listenable: service,
           builder: (context, _) {
-            final query = _searchController.text.trim().toLowerCase();
+            final query = _query;
             final entries = service.entries
                 .where((entry) =>
                     query.isEmpty ||
@@ -70,7 +86,7 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   RoundIconButton(
-                    icon: Icons.arrow_back_rounded,
+                    icon: HugeIcons.strokeRoundedArrowLeft01,
                     tooltip: 'Back',
                     size: 40,
                     onPressed: () => Navigator.of(context).maybePop(),
@@ -94,7 +110,7 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
                     ),
                   ),
                   RoundIconButton(
-                    icon: Icons.delete_sweep_outlined,
+                    icon: HugeIcons.strokeRoundedDelete02,
                     tooltip: 'Clear bookmarks',
                     color: palette.destructive,
                     onPressed: service.entries.isEmpty ? null : _clear,
@@ -107,7 +123,7 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
                 textInputAction: TextInputAction.search,
                 decoration: InputDecoration(
                   hintText: 'Search bookmarks',
-                  prefixIcon: Icon(Icons.search_rounded,
+                  prefixIcon: HugeIcon(icon: HugeIcons.strokeRoundedSearch01,
                       size: 20, color: palette.mutedForeground),
                 ),
               ),
@@ -117,8 +133,8 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
                   padding: const EdgeInsets.only(top: 24),
                   child: EmptyState(
                     icon: query.isEmpty
-                        ? Icons.bookmark_border_rounded
-                        : Icons.search_off_rounded,
+                        ? HugeIcons.strokeRoundedBookmark01
+                        : HugeIcons.strokeRoundedSearchRemove,
                     title: query.isEmpty ? 'No bookmarks yet' : 'No matches',
                     message: query.isEmpty
                         ? 'Bookmark pages from the Comet browser to keep them here.'
@@ -214,7 +230,7 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
                   ),
                 );
               },
-              icon: Icon(Icons.bookmark_remove_outlined,
+              icon: HugeIcon(icon: HugeIcons.strokeRoundedBookmarkRemove01,
                   size: 18, color: palette.mutedForeground),
             ),
           ],
@@ -233,7 +249,7 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
         color: palette.accent,
         borderRadius: BorderRadius.circular(AppRadius.inner),
       ),
-      child: Icon(Icons.bookmark_rounded,
+      child: HugeIcon(icon: HugeIcons.strokeRoundedBookmark02,
           size: 22, color: palette.accentForeground),
     );
     if (thumbnail == null || thumbnail.isEmpty) return fallback;
@@ -246,6 +262,7 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
         cacheWidth: (52 * MediaQuery.devicePixelRatioOf(context)).round(),
         filterQuality: FilterQuality.medium,
         fit: BoxFit.cover,
+        gaplessPlayback: true,
         errorBuilder: (_, __, ___) => fallback,
       ),
     );

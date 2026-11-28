@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:hugeicons/hugeicons.dart';
 
 import '../theme/app_theme.dart';
 
@@ -100,7 +101,7 @@ class RoundIconButton extends StatelessWidget {
     this.borderColor,
   });
 
-  final IconData icon;
+  final List<List<dynamic>> icon;
   final VoidCallback? onPressed;
   final double size;
   final String? tooltip;
@@ -134,7 +135,7 @@ class RoundIconButton extends StatelessWidget {
           child: Stack(
             alignment: Alignment.center,
             children: [
-              Icon(icon, size: iconSize, color: foreground),
+              HugeIcon(icon: icon, size: iconSize, color: foreground),
               if (badge != null)
                 Positioned(
                   top: 4,
@@ -150,7 +151,7 @@ class RoundIconButton extends StatelessWidget {
                     ),
                     child: Text(
                       badge!,
-                      style: AppText.body(10,
+                      style: AppText.body(11,
                           weight: FontWeight.w800, color: AppColors.white),
                     ),
                   ),
@@ -262,7 +263,7 @@ class _PillButton extends StatelessWidget {
                 ),
                 child: Text(
                   badge!,
-                  style: AppText.body(10,
+                  style: AppText.body(11,
                       weight: FontWeight.w800, color: AppColors.white),
                 ),
               ),
@@ -284,7 +285,7 @@ class StatTile extends StatelessWidget {
 
   final String label;
   final String value;
-  final IconData? icon;
+  final List<List<dynamic>>? icon;
 
   @override
   Widget build(BuildContext context) {
@@ -305,7 +306,8 @@ class StatTile extends StatelessWidget {
                 ),
               ),
               if (icon != null)
-                Icon(icon, size: 15, color: palette.accentForeground),
+                HugeIcon(
+                    icon: icon!, size: 15, color: palette.accentForeground),
             ],
           ),
           const SizedBox(height: 8),
@@ -330,7 +332,7 @@ class EmptyState extends StatelessWidget {
     this.action,
   });
 
-  final IconData icon;
+  final List<List<dynamic>> icon;
   final String title;
   final String message;
   final Widget? action;
@@ -351,7 +353,7 @@ class EmptyState extends StatelessWidget {
                 color: palette.accent,
                 borderRadius: BorderRadius.circular(AppRadius.inner),
               ),
-              child: Icon(icon, color: palette.accentForeground, size: 28),
+              child: HugeIcon(icon: icon, color: palette.accentForeground, size: 28),
             ),
             const SizedBox(height: 16),
             Text(title,

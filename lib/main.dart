@@ -42,7 +42,11 @@ void main(List<String> args) async {
   await SettingsService.instance.init();
   await StorageService.instance.init();
   runApp(const CometApp());
-  unawaited(_initRemaining());
+  // Start the remaining services only after the first frame is painted so the
+  // home screen appears immediately instead of waiting for disk/engine work.
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    unawaited(_initRemaining());
+  });
 }
 
 Future<void> _initRemaining() async {

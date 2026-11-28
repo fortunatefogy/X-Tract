@@ -1,3 +1,4 @@
+import 'package:hugeicons/hugeicons.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
@@ -887,7 +888,7 @@ class _TapRow extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 8),
-            Icon(Icons.chevron_right_rounded,
+            HugeIcon(icon: HugeIcons.strokeRoundedArrowRight01,
                 size: 20, color: palette.mutedForeground),
           ],
         ),
@@ -995,8 +996,8 @@ class _AdBlockListRow extends StatelessWidget {
           IconButton(
             tooltip: 'Remove list',
             onPressed: onDelete,
-            icon: Icon(
-              Icons.close_rounded,
+            icon: HugeIcon(icon: 
+              HugeIcons.strokeRoundedCancel01,
               size: 18,
               color: palette.mutedForeground,
             ),
@@ -1050,7 +1051,7 @@ class _DropdownRow<T> extends StatelessWidget {
                 value: value,
                 isDense: true,
                 borderRadius: BorderRadius.circular(AppRadius.inner),
-                icon: Icon(Icons.expand_more_rounded,
+                icon: HugeIcon(icon: HugeIcons.strokeRoundedArrowDown01,
                     size: 18, color: palette.mutedForeground),
                 style: AppText.body(13, color: palette.foreground),
                 items: items,
@@ -1108,20 +1109,20 @@ class _ProxyRow extends StatelessWidget {
             tooltip: 'Move up',
             visualDensity: VisualDensity.compact,
             onPressed: index == 0 ? null : onUp,
-            icon: const Icon(Icons.keyboard_arrow_up_rounded, size: 20),
+            icon: const HugeIcon(icon: HugeIcons.strokeRoundedArrowUp01, size: 20),
           ),
           IconButton(
             tooltip: 'Move down',
             visualDensity: VisualDensity.compact,
             onPressed: index == count - 1 ? null : onDown,
-            icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 20),
+            icon: const HugeIcon(icon: HugeIcons.strokeRoundedArrowDown01, size: 20),
           ),
           IconButton(
             tooltip: 'Remove',
             visualDensity: VisualDensity.compact,
             onPressed: onRemove,
             icon:
-                Icon(Icons.close_rounded, size: 18, color: palette.destructive),
+                HugeIcon(icon: HugeIcons.strokeRoundedCancel01, size: 18, color: palette.destructive),
           ),
         ],
       ),
@@ -1165,7 +1166,7 @@ class _AccentSwatch extends StatelessWidget {
               ),
             ),
             child: selected
-                ? const Icon(Icons.check_rounded,
+                ? const HugeIcon(icon: HugeIcons.strokeRoundedTick02,
                     size: 18, color: AppColors.white)
                 : null,
           ),

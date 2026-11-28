@@ -32,13 +32,15 @@ class ChallengeHosts {
     '/api/v1/challenge',
   ];
 
+  static final RegExp _wwwPrefix = RegExp(r'^www\.');
+  static final Set<String> _normalizedHosts = {
+    for (final entry in hosts) entry.replaceFirst(_wwwPrefix, ''),
+  };
+
   static bool isChallenge(Uri uri) {
-    final host = uri.host.toLowerCase().replaceFirst(RegExp(r'^www\.'), '');
+    final host = uri.host.toLowerCase().replaceFirst(_wwwPrefix, '');
     if (host.isEmpty) return false;
-    final normalizedHosts = {
-      for (final entry in hosts) entry.replaceFirst(RegExp(r'^www\.'), ''),
-    };
-    if (normalizedHosts.contains(host)) return true;
+    if (_normalizedHosts.contains(host)) return true;
     if (host.endsWith('.hcaptcha.com') ||
         host.endsWith('.cloudflare.com') ||
         host.endsWith('.arkoselabs.com') ||

@@ -1,3 +1,4 @@
+import 'package:hugeicons/hugeicons.dart';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -40,8 +41,10 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
 
   void _sampleSpeeds() {
     final now = DateTime.now();
+    final running = <String>{};
     for (final record in DownloadService.instance.records
         .where((record) => record.state == DownloadState.running)) {
+      running.add(record.taskId);
       final previousProgress = _speedProgress[record.taskId];
       final previousTime = _speedSampledAt[record.taskId];
       if (previousProgress != null &&
@@ -56,6 +59,9 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
       _speedProgress[record.taskId] = record.progress;
       _speedSampledAt[record.taskId] = now;
     }
+    _speeds.removeWhere((id, _) => !running.contains(id));
+    _speedProgress.removeWhere((id, _) => !running.contains(id));
+    _speedSampledAt.removeWhere((id, _) => !running.contains(id));
   }
 
   Future<void> _openFolder() async {
@@ -188,9 +194,15 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
   Widget build(BuildContext context) {
     final palette = context.palette;
     final downloads = DownloadService.instance;
-    final active = downloads.active;
-    final failures = downloads.failures;
-    final completed = downloads.records
+    final all = downloads.records;
+    final active =
+        all.where((record) => record.state.isActive).toList(growable: false);
+    final failures = all
+        .where((record) =>
+            record.state == DownloadState.failed ||
+            record.state == DownloadState.canceled)
+        .toList(growable: false);
+    final completed = all
         .where((record) => record.state == DownloadState.complete)
         .toList(growable: false);
 
@@ -240,7 +252,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                 PopupMenuButton<String>(
                   tooltip: 'Queue tools',
                   icon:
-                      Icon(Icons.more_horiz_rounded, color: palette.foreground),
+                      HugeIcon(icon: HugeIcons.strokeRoundedMoreHorizontal, color: palette.foreground),
                   onSelected: (value) {
                     if (value == 'pauseAll') downloads.pauseAll();
                     if (value == 'resumeAll') downloads.resumeAll();
@@ -304,7 +316,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                   child: StatTile(
                     label: 'Progress',
                     value: '${(overall * 100).clamp(0, 100).round()}%',
-                    icon: Icons.trending_up_rounded,
+                    icon: HugeIcons.strokeRoundedTrendingUp,
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -312,7 +324,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                   child: StatTile(
                     label: 'Speed',
                     value: speed > 0 ? _formatSpeed(speed) : '—',
-                    icon: Icons.bolt_rounded,
+                    icon: HugeIcons.strokeRoundedZap,
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -324,7 +336,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                         : remaining.inMinutes > 0
                             ? '${remaining.inMinutes} min'
                             : '${remaining.inSeconds}s',
-                    icon: Icons.timer_outlined,
+                    icon: HugeIcons.strokeRoundedTimer01,
                   ),
                 ),
               ],
@@ -334,7 +346,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
               padding: const EdgeInsets.fromLTRB(14, 8, 6, 8),
               child: Row(
                 children: [
-                  Icon(Icons.folder_rounded,
+                  HugeIcon(icon: HugeIcons.strokeRoundedFolder02,
                       size: 18, color: AppColors.primary),
                   const SizedBox(width: 10),
                   Expanded(
@@ -370,7 +382,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
       return [
         const SizedBox(height: 24),
         const EmptyState(
-          icon: Icons.download_done_rounded,
+          icon: HugeIcons.strokeRoundedDownload04,
           title: 'No active downloads',
           message:
               'Queue media from Home. Finished files are saved in your Library.',
@@ -441,12 +453,12 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                     color: palette.accent,
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: Icon(
+                  child: HugeIcon(icon: 
                     record.type == 'audio'
-                        ? Icons.music_note_rounded
+                        ? HugeIcons.strokeRoundedMusicNote01
                         : record.type == 'image'
-                            ? Icons.image_outlined
-                            : Icons.play_circle_fill_rounded,
+                            ? HugeIcons.strokeRoundedImage01
+                            : HugeIcons.strokeRoundedPlayCircle02,
                     color: palette.accentForeground,
                     size: 24,
                   ),
@@ -478,7 +490,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                                 record.isLive && record.state.isActive
                                     ? 'LIVE'
                                     : '$percent%',
-                                style: AppText.body(10,
+                                style: AppText.body(11,
                                     weight: FontWeight.w700,
                                     color: palette.accentForeground)),
                           ),
@@ -519,10 +531,10 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                             side: BorderSide.none,
                             minimumSize: const Size(0, 44),
                           ),
-                          icon: Icon(
+                          icon: HugeIcon(icon: 
                             record.isLive
-                                ? Icons.stop_circle_outlined
-                                : Icons.pause_rounded,
+                                ? HugeIcons.strokeRoundedStopCircle
+                                : HugeIcons.strokeRoundedPause,
                             size: 18,
                           ),
                           label: Text(record.isLive ? 'Stop & save' : 'Pause'),
@@ -533,10 +545,10 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                                   ? () =>
                                       DownloadService.instance.resume(record)
                                   : () => _retry(record),
-                              icon: Icon(
+                              icon: HugeIcon(icon: 
                                 canResume
-                                    ? Icons.play_arrow_rounded
-                                    : Icons.refresh_rounded,
+                                    ? HugeIcons.strokeRoundedPlay
+                                    : HugeIcons.strokeRoundedRefresh,
                                 size: 18,
                               ),
                               label: Text(canResume ? 'Resume' : 'Retry'),
@@ -549,7 +561,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                                 minimumSize: const Size(0, 44),
                               ),
                               icon:
-                                  const Icon(Icons.schedule_rounded, size: 18),
+                                  const HugeIcon(icon: HugeIcons.strokeRoundedClock01, size: 18),
                               label: Text(_stateLabel(record.state)),
                             ),
                 ),
@@ -568,7 +580,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                       foregroundColor: palette.destructive,
                       minimumSize: const Size(44, 44),
                     ),
-                    child: const Icon(Icons.close_rounded, size: 18),
+                    child: const HugeIcon(icon: HugeIcons.strokeRoundedCancel01, size: 18),
                   ),
                 ),
               ],

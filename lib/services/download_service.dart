@@ -246,6 +246,10 @@ class DownloadService extends ChangeNotifier {
   List<DownloadRecord> get active =>
       records.where((record) => record.state.isActive).toList();
 
+  /// Active-download count without sorting the full record list.
+  int get activeCount =>
+      _records.values.where((record) => record.state.isActive).length;
+
   List<DownloadRecord> get failures => records
       .where((record) =>
           record.state == DownloadState.failed ||
@@ -890,44 +894,172 @@ class DownloadService extends ChangeNotifier {
     return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(2)} GB';
   }
 
-  Future<void> _runHls(
+  Future<void> _runHls(DownloadRecord record, _ChunkHandle handle) =>
+      _runEngine(
+        record,
+        handle,
+        workDirName: '.linky-hls',
+        remuxToMp4: true,
+        run: (directory, handle) async {
+          final id = record.taskId;
+          final destination = File(
+            '${directory.path}${Platform.pathSeparator}${record.filename}',
+          );
+          final work = Directory(
+            '${directory.path}${Platform.pathSeparator}.linky-hls'
+            '${Platform.pathSeparator}$id',
+          );
+          try {
+            final result = await HlsDownloader(
+              workers: SettingsService.instance.downloadThreadCount,
+            ).download(
+              url: record.url,
+              destination: destination,
+              workDirectory: work,
+              headers: record.requestHeaders,
+              isCancelled: () => handle.stopRequested,
+              audioOnly: SettingsService.instance.audioOnlyDownloads,
+              onLiveDetected: () => _markLive(id),
+              onProgress: (completed, total) {
+                final current = _records[id];
+                if (current == null) return;
+                final ratio = total > 0
+                    ? (completed / total).clamp(0.0, 1.0).toDouble()
+                    : current.progress;
+                _records[id] = current.copyWith(
+                  state: DownloadState.running,
+                  progress: ratio,
+                );
+                _reportProgress(current, ratio, indeterminate: total <= 0);
+                _notify();
+              },
+            );
+            return _EngineResult(
+              file: result.file,
+              warning: result.warning,
+              isLive: result.isLive,
+            );
+          } on HlsCanceled {
+            throw const _DownloadCanceled();
+          }
+        },
+      );
+
+  Future<void> _runDash(DownloadRecord record, _ChunkHandle handle) =>
+      _runEngine(
+        record,
+        handle,
+        workDirName: '.linky-dash',
+        run: (directory, handle) async {
+          final id = record.taskId;
+          final destination = File(
+            '${directory.path}${Platform.pathSeparator}${record.filename}',
+          );
+          final work = Directory(
+            '${directory.path}${Platform.pathSeparator}.linky-dash'
+            '${Platform.pathSeparator}$id',
+          );
+          try {
+            final result = await DashDownloader(
+              workers: SettingsService.instance.downloadThreadCount,
+            ).download(
+              url: record.url,
+              destination: destination,
+              workDirectory: work,
+              headers: record.requestHeaders,
+              isCancelled: () => handle.stopRequested,
+              audioOnly: SettingsService.instance.audioOnlyDownloads,
+              onLiveDetected: () => _markLive(id),
+              preferredFormatId: record.formatId,
+              onProgress: (completed, total) {
+                final current = _records[id];
+                if (current == null) return;
+                final ratio = total > 0
+                    ? (completed / total).clamp(0.0, 1.0).toDouble()
+                    : current.progress;
+                _records[id] = current.copyWith(
+                  state: DownloadState.running,
+                  progress: ratio,
+                );
+                _reportProgress(current, ratio, indeterminate: total <= 0);
+                _notify();
+              },
+            );
+            return _EngineResult(
+              file: result.file,
+              warning: result.warning,
+              isLive: result.isLive,
+            );
+          } on DashCanceled {
+            throw const _DownloadCanceled();
+          }
+        },
+      );
+
+  Future<void> _runChunked(DownloadRecord record, _ChunkHandle handle) =>
+      _runEngine(
+        record,
+        handle,
+        workDirName: '.linky-parts',
+        run: (directory, handle) async {
+          final id = record.taskId;
+          final destination = File(
+            '${directory.path}${Platform.pathSeparator}${record.filename}',
+          );
+          final work = Directory(
+            '${directory.path}${Platform.pathSeparator}.linky-parts'
+            '${Platform.pathSeparator}$id',
+          );
+          try {
+            final file = await ChunkedDownloader(
+              threadCount: SettingsService.instance.downloadThreadCount,
+            ).download(
+              url: record.url,
+              destination: destination,
+              workDirectory: work,
+              headers: record.requestHeaders,
+              expectedBytes:
+                  record.expectedBytes > 0 ? record.expectedBytes : null,
+              isCancelled: () => handle.stopRequested,
+              onProgress: (received, total) {
+                final current = _records[id];
+                if (current == null) return;
+                final ratio = total != null && total > 0
+                    ? (received / total).clamp(0.0, 1.0).toDouble()
+                    : current.progress;
+                _records[id] = current.copyWith(
+                  state: DownloadState.running,
+                  progress: ratio,
+                  expectedBytes: total != null && total > 0
+                      ? total
+                      : current.expectedBytes,
+                );
+                _reportProgress(current, ratio,
+                    indeterminate: total == null || total <= 0);
+                _notify();
+              },
+            );
+            return _EngineResult(file: file);
+          } on ChunkedDownloadCanceled {
+            throw const _DownloadCanceled();
+          }
+        },
+      );
+
+  Future<void> _runEngine(
     DownloadRecord record,
-    _ChunkHandle handle,
-  ) async {
+    _ChunkHandle handle, {
+    required String workDirName,
+    bool remuxToMp4 = false,
+    required Future<_EngineResult> Function(
+      Directory directory,
+      _ChunkHandle handle,
+    ) run,
+  }) async {
     final id = record.taskId;
     try {
       final directory = await _directory(record.folder);
-      final destination = File(
-        '${directory.path}${Platform.pathSeparator}${record.filename}',
-      );
-      final work = Directory(
-        '${directory.path}${Platform.pathSeparator}.linky-hls'
-        '${Platform.pathSeparator}$id',
-      );
-      final result = await HlsDownloader(
-        workers: SettingsService.instance.downloadThreadCount,
-      ).download(
-        url: record.url,
-        destination: destination,
-        workDirectory: work,
-        headers: record.requestHeaders,
-        isCancelled: () => handle.stopRequested,
-        audioOnly: SettingsService.instance.audioOnlyDownloads,
-        onLiveDetected: () => _markLive(id),
-        onProgress: (completed, total) {
-          final current = _records[id];
-          if (current == null) return;
-          final ratio = total > 0
-              ? (completed / total).clamp(0.0, 1.0).toDouble()
-              : current.progress;
-          _records[id] = current.copyWith(
-            state: DownloadState.running,
-            progress: ratio,
-          );
-          _reportProgress(current, ratio, indeterminate: total <= 0);
-          _notify();
-        },
-      );
+      final result = await run(directory, handle);
       final current = _records[id];
       if (current == null) return;
       if (current.state == DownloadState.canceled) {
@@ -936,34 +1068,36 @@ class DownloadService extends ChangeNotifier {
         } catch (_) {}
         return;
       }
-      // Always deliver HLS as an MP4 video file. TS captures are remuxed with
-      // the native muxer; fragmented-MP4 captures already have the .mp4 name.
       var mediaFile = result.file;
       String? remuxWarning;
-      final lowerMedia = mediaFile.path.toLowerCase();
-      if (!lowerMedia.endsWith('.mp4') && !lowerMedia.endsWith('.m4a')) {
-        final dot = mediaFile.path.lastIndexOf('.');
-        final targetPath = dot > 0
-            ? '${mediaFile.path.substring(0, dot)}.mp4'
-            : '${mediaFile.path}.mp4';
-        try {
-          final remuxed = await DeviceResources.instance.remuxMedia(
-            mediaFile.path,
-            targetPath,
-          );
-          if (remuxed != null) {
-            final remuxFile = File(remuxed);
-            if (await remuxFile.exists() && await remuxFile.length() > 0) {
-              try {
-                await mediaFile.delete();
-              } catch (_) {}
-              mediaFile = remuxFile;
+      if (remuxToMp4) {
+        // Always deliver HLS as an MP4 video file. TS captures are remuxed with
+        // the native muxer; fragmented-MP4 captures already have the .mp4 name.
+        final lowerMedia = mediaFile.path.toLowerCase();
+        if (!lowerMedia.endsWith('.mp4') && !lowerMedia.endsWith('.m4a')) {
+          final dot = mediaFile.path.lastIndexOf('.');
+          final targetPath = dot > 0
+              ? '${mediaFile.path.substring(0, dot)}.mp4'
+              : '${mediaFile.path}.mp4';
+          try {
+            final remuxed = await DeviceResources.instance.remuxMedia(
+              mediaFile.path,
+              targetPath,
+            );
+            if (remuxed != null) {
+              final remuxFile = File(remuxed);
+              if (await remuxFile.exists() && await remuxFile.length() > 0) {
+                try {
+                  await mediaFile.delete();
+                } catch (_) {}
+                mediaFile = remuxFile;
+              }
             }
+          } catch (_) {}
+          if (!mediaFile.path.toLowerCase().endsWith('.mp4')) {
+            remuxWarning =
+                'Saved the HLS stream as-is because the MP4 remux failed.';
           }
-        } catch (_) {}
-        if (!mediaFile.path.toLowerCase().endsWith('.mp4')) {
-          remuxWarning =
-              'Saved the HLS stream as-is because the MP4 remux failed.';
         }
       }
       final post = await _postProcess(
@@ -971,7 +1105,7 @@ class DownloadService extends ChangeNotifier {
         mediaFile,
         result.warning ??
             remuxWarning ??
-            (result.isLive ? 'Live recording saved.' : null),
+            (result.isLive == true ? 'Live recording saved.' : null),
       );
       _records[id] = current.copyWith(
         state: DownloadState.complete,
@@ -985,7 +1119,7 @@ class DownloadService extends ChangeNotifier {
       _schedulePersist();
       unawaited(
           NotificationService.downloadComplete(current.title, taskId: id));
-    } on HlsCanceled {
+    } on _DownloadCanceled {
       final current = _records[id];
       if (current != null) {
         _records[id] = current.copyWith(
@@ -1000,205 +1134,7 @@ class DownloadService extends ChangeNotifier {
         final directory = await _directory(record.folder);
         try {
           await Directory(
-            '${directory.path}${Platform.pathSeparator}.linky-hls'
-            '${Platform.pathSeparator}$id',
-          ).delete(recursive: true);
-        } catch (_) {}
-      }
-      _notify(force: true);
-      _schedulePersist();
-      _dismissNotification(id);
-    } catch (error) {
-      final current = _records[id];
-      if (current != null) {
-        _records[id] = current.copyWith(
-          state: DownloadState.failed,
-          error: 'Download failed: $error',
-        );
-      }
-      _notify(force: true);
-      _schedulePersist();
-      _dismissNotification(id);
-    }
-  }
-
-  Future<void> _runDash(
-    DownloadRecord record,
-    _ChunkHandle handle,
-  ) async {
-    final id = record.taskId;
-    try {
-      final directory = await _directory(record.folder);
-      final destination = File(
-        '${directory.path}${Platform.pathSeparator}${record.filename}',
-      );
-      final work = Directory(
-        '${directory.path}${Platform.pathSeparator}.linky-dash'
-        '${Platform.pathSeparator}$id',
-      );
-      final result = await DashDownloader(
-        workers: SettingsService.instance.downloadThreadCount,
-      ).download(
-        url: record.url,
-        destination: destination,
-        workDirectory: work,
-        headers: record.requestHeaders,
-        isCancelled: () => handle.stopRequested,
-        audioOnly: SettingsService.instance.audioOnlyDownloads,
-        onLiveDetected: () => _markLive(id),
-        preferredFormatId: record.formatId,
-        onProgress: (completed, total) {
-          final current = _records[id];
-          if (current == null) return;
-          final ratio = total > 0
-              ? (completed / total).clamp(0.0, 1.0).toDouble()
-              : current.progress;
-          _records[id] = current.copyWith(
-            state: DownloadState.running,
-            progress: ratio,
-          );
-          _reportProgress(current, ratio, indeterminate: total <= 0);
-          _notify();
-        },
-      );
-      final current = _records[id];
-      if (current == null) return;
-      if (current.state == DownloadState.canceled) {
-        try {
-          await result.file.delete();
-        } catch (_) {}
-        return;
-      }
-      final post = await _postProcess(
-        record,
-        result.file,
-        result.warning ?? (result.isLive ? 'Live recording saved.' : null),
-      );
-      _records[id] = current.copyWith(
-        state: DownloadState.complete,
-        progress: 1,
-        expectedBytes: await post.$1.length(),
-        filePath: post.$1.path,
-        error: post.$2,
-        isLive: result.isLive,
-      );
-      _notify(force: true);
-      _schedulePersist();
-      unawaited(
-          NotificationService.downloadComplete(current.title, taskId: id));
-    } on DashCanceled {
-      final current = _records[id];
-      if (current != null) {
-        _records[id] = current.copyWith(
-          state:
-              handle.canceled ? DownloadState.canceled : DownloadState.paused,
-          error: handle.canceled
-              ? 'Download canceled.'
-              : 'Paused. Tap resume to continue.',
-        );
-      }
-      if (handle.canceled) {
-        final directory = await _directory(record.folder);
-        try {
-          await Directory(
-            '${directory.path}${Platform.pathSeparator}.linky-dash'
-            '${Platform.pathSeparator}$id',
-          ).delete(recursive: true);
-        } catch (_) {}
-      }
-      _notify(force: true);
-      _schedulePersist();
-      _dismissNotification(id);
-    } catch (error) {
-      final current = _records[id];
-      if (current != null) {
-        _records[id] = current.copyWith(
-          state: DownloadState.failed,
-          error: 'Download failed: $error',
-        );
-      }
-      _notify(force: true);
-      _schedulePersist();
-      _dismissNotification(id);
-    }
-  }
-
-  Future<void> _runChunked(
-    DownloadRecord record,
-    _ChunkHandle handle,
-  ) async {
-    final id = record.taskId;
-    try {
-      final directory = await _directory(record.folder);
-      final destination = File(
-        '${directory.path}${Platform.pathSeparator}${record.filename}',
-      );
-      final work = Directory(
-        '${directory.path}${Platform.pathSeparator}.linky-parts'
-        '${Platform.pathSeparator}$id',
-      );
-      final file = await ChunkedDownloader(
-        threadCount: SettingsService.instance.downloadThreadCount,
-      ).download(
-        url: record.url,
-        destination: destination,
-        workDirectory: work,
-        headers: record.requestHeaders,
-        expectedBytes: record.expectedBytes > 0 ? record.expectedBytes : null,
-        isCancelled: () => handle.stopRequested,
-        onProgress: (received, total) {
-          final current = _records[id];
-          if (current == null) return;
-          final ratio = total != null && total > 0
-              ? (received / total).clamp(0.0, 1.0).toDouble()
-              : current.progress;
-          _records[id] = current.copyWith(
-            state: DownloadState.running,
-            progress: ratio,
-            expectedBytes:
-                total != null && total > 0 ? total : current.expectedBytes,
-          );
-          _reportProgress(current, ratio,
-              indeterminate: total == null || total <= 0);
-          _notify();
-        },
-      );
-      final current = _records[id];
-      if (current == null) return;
-      if (current.state == DownloadState.canceled) {
-        try {
-          await file.delete();
-        } catch (_) {}
-        return;
-      }
-      final post = await _postProcess(record, file, null);
-      _records[id] = current.copyWith(
-        state: DownloadState.complete,
-        progress: 1,
-        expectedBytes: await post.$1.length(),
-        filePath: post.$1.path,
-        error: post.$2,
-      );
-      _notify(force: true);
-      _schedulePersist();
-      unawaited(
-          NotificationService.downloadComplete(current.title, taskId: id));
-    } on ChunkedDownloadCanceled {
-      final current = _records[id];
-      if (current != null) {
-        _records[id] = current.copyWith(
-          state:
-              handle.canceled ? DownloadState.canceled : DownloadState.paused,
-          error: handle.canceled
-              ? 'Download canceled.'
-              : 'Paused. Tap resume to continue.',
-        );
-      }
-      if (handle.canceled) {
-        final directory = await _directory(record.folder);
-        try {
-          await Directory(
-            '${directory.path}${Platform.pathSeparator}.linky-parts'
+            '${directory.path}${Platform.pathSeparator}$workDirName'
             '${Platform.pathSeparator}$id',
           ).delete(recursive: true);
         } catch (_) {}
@@ -1595,6 +1531,18 @@ class _ChunkHandle {
   bool stopRequested = false;
   bool paused = false;
   bool canceled = false;
+}
+
+class _EngineResult {
+  const _EngineResult({required this.file, this.warning, this.isLive});
+
+  final File file;
+  final String? warning;
+  final bool? isLive;
+}
+
+class _DownloadCanceled implements Exception {
+  const _DownloadCanceled();
 }
 
 class _ResourceBlock {

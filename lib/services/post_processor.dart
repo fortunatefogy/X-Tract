@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'device_resources.dart';
+import 'downloader_utils.dart';
 import 'mp4_faststart.dart';
 import 'settings_service.dart';
 
@@ -40,13 +41,13 @@ class PostProcessor {
     if (settings.audioOnlyDownloads &&
         type == 'video' &&
         !_isAudioFile(current)) {
-      final target = File('${_stem(current.path)}-audio.m4a');
+      final target = File('${pathStem(current.path)}-audio.m4a');
       final output = await DeviceResources.instance.extractAudio(
         current.path,
         target.path,
       );
       if (output != null && await File(output).exists()) {
-        await _deleteQuietly(current);
+        await deleteQuietly(current);
         current = File(output);
       } else {
         warning = 'Could not extract the audio track; kept the video file.';
@@ -55,13 +56,13 @@ class PostProcessor {
       final repair = settings.repairStreams && _needsRepair(current);
       if ((settings.remuxDownloads || repair) &&
           !current.path.toLowerCase().endsWith('.mp4')) {
-        final target = File('${_stem(current.path)}.mp4');
+        final target = File('${pathStem(current.path)}.mp4');
         final output = await DeviceResources.instance.remuxMedia(
           current.path,
           target.path,
         );
         if (output != null && await File(output).exists()) {
-          await _deleteQuietly(current);
+          await deleteQuietly(current);
           current = File(output);
         } else {
           warning = 'Could not remux this file; kept the original download.';
@@ -94,14 +95,4 @@ class PostProcessor {
     return _repairExtensions.contains(name.substring(dot + 1));
   }
 
-  String _stem(String path) {
-    final dot = path.lastIndexOf('.');
-    return dot > 0 ? path.substring(0, dot) : path;
-  }
-
-  Future<void> _deleteQuietly(File file) async {
-    try {
-      if (await file.exists()) await file.delete();
-    } catch (_) {}
-  }
 }

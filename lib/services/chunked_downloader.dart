@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'downloader_utils.dart';
 import 'proxy_service.dart';
 import 'secure_dns_service.dart';
 import 'dart:math';
@@ -126,7 +127,7 @@ class ChunkedDownloader {
     }
     total ??= expectedBytes;
     if (status == 206 && total != null) {
-      await _discard(response);
+      await discardResponse(response);
       return _Probe(total: total, supportsRange: true);
     }
     if (status == 200) {
@@ -138,10 +139,10 @@ class ChunkedDownloader {
       );
     }
     if (status == 416 && expectedBytes != null) {
-      await _discard(response);
+      await discardResponse(response);
       return _Probe(total: expectedBytes, supportsRange: true);
     }
-    await _discard(response);
+    await discardResponse(response);
     if (status >= 400) {
       // Some servers reject ranged requests (400/405/412/501) but serve the
       // file fine as a normal GET. Fall back to a single stream instead of
@@ -158,7 +159,7 @@ class ChunkedDownloader {
               response: plain,
             );
           }
-          await _discard(plain);
+          await discardResponse(plain);
         } catch (_) {}
       }
       throw HttpException(
@@ -180,7 +181,7 @@ class ChunkedDownloader {
     bool Function()? isCancelled,
   }) async {
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      await _discard(response);
+      await discardResponse(response);
       throw HttpException(
         'The media server returned HTTP ${response.statusCode}.',
       );
@@ -433,17 +434,17 @@ class ChunkedDownloader {
         continue;
       }
       if (response.statusCode == 200) {
-        await _discard(response);
+        await discardResponse(response);
         throw const _RangeUnsupported();
       }
       if (response.statusCode == 416) {
-        await _discard(response);
+        await discardResponse(response);
         have = await file.exists() ? await file.length() : 0;
         if (have >= chunk.length) return;
         throw HttpException('The server rejected the requested byte range.');
       }
       final status = response.statusCode;
-      await _discard(response);
+      await discardResponse(response);
       attempts++;
       if (attempts > retries) {
         throw HttpException(
@@ -461,30 +462,17 @@ class ChunkedDownloader {
     Map<String, String> headers, {
     String? range,
   }) async {
-    var current = uri;
-    for (var redirects = 0;; redirects++) {
-      final request = await client.getUrl(current);
-      request.followRedirects = false;
-      if (current.origin == uri.origin) {
-        headers.forEach(request.headers.set);
-      }
-      request.headers.set(HttpHeaders.acceptEncodingHeader, 'identity');
-      if (range != null) request.headers.set(HttpHeaders.rangeHeader, range);
-      final response = await request.close();
-      if (!response.isRedirect) return response;
-      if (redirects >= 5) {
-        await _discard(response);
-        throw const HttpException('The media link redirected too many times.');
-      }
-      final location = response.headers.value(HttpHeaders.locationHeader);
-      await _discard(response);
-      if (location == null)
-        throw const HttpException('Invalid media redirect.');
-      current = current.resolve(location);
-      if (!{'http', 'https'}.contains(current.scheme)) {
-        throw const HttpException('Unsupported media redirect.');
-      }
-    }
+    final (response, _) = await openFollowingRedirects(
+      client,
+      uri,
+      headers,
+      range: range,
+      identityEncoding: true,
+      redirectLimitMessage: 'The media link redirected too many times.',
+      invalidRedirectMessage: 'Invalid media redirect.',
+      unsupportedRedirectMessage: 'Unsupported media redirect.',
+    );
+    return response;
   }
 
   int? _totalFromContentRange(String value) {
@@ -494,14 +482,4 @@ class ChunkedDownloader {
     return total != null && total > 0 ? total : null;
   }
 
-  Future<void> _discard(HttpClientResponse response) async {
-    try {
-      final socket = await response.detachSocket();
-      socket.destroy();
-    } catch (_) {
-      try {
-        await response.drain<void>();
-      } catch (_) {}
-    }
-  }
 }

@@ -1,3 +1,4 @@
+import 'package:hugeicons/hugeicons.dart';
 import 'dart:async';
 import 'dart:io';
 
@@ -14,6 +15,7 @@ import '../../services/settings_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/app_ui.dart';
 import '../../widgets/media_thumbnail.dart';
+import '../../widgets/skeleton.dart';
 import '../downloads/video_playback_screen.dart';
 import 'folder_picker.dart';
 import 'library_media_viewer.dart';
@@ -73,17 +75,25 @@ class _LibraryScreenState extends State<LibraryScreen> {
   bool _locked = false;
   bool _authenticating = false;
   String? _authError;
+  bool _lockEnabled = false;
+  Timer? _searchDebounce;
+  String _query = '';
+  _LibraryData? _filteredData;
+  List<File>? _filteredFilesCache;
+  String? _filteredQuery;
+  String? _filteredFilter;
 
   @override
   void initState() {
     super.initState();
     _data = _loadData();
+    _lockEnabled = SettingsService.instance.libraryLockEnabled;
     DownloadService.instance.addListener(_onDownloadsChanged);
     SettingsService.instance.addListener(_onSettingsChanged);
     LibraryFolders.instance.addListener(_onFoldersChanged);
     LibraryLockController.instance.addListener(_onLockRequested);
-    _searchController.addListener(() => setState(() {}));
-    if (SettingsService.instance.libraryLockEnabled) {
+    _searchController.addListener(_onSearchChanged);
+    if (_lockEnabled) {
       _locked = true;
       WidgetsBinding.instance.addPostFrameCallback((_) => _authenticate());
     }
@@ -95,8 +105,41 @@ class _LibraryScreenState extends State<LibraryScreen> {
     SettingsService.instance.removeListener(_onSettingsChanged);
     LibraryFolders.instance.removeListener(_onFoldersChanged);
     LibraryLockController.instance.removeListener(_onLockRequested);
+    _searchDebounce?.cancel();
     _searchController.dispose();
     super.dispose();
+  }
+
+  void _onSearchChanged() {
+    final value = _searchController.text.trim().toLowerCase();
+    if (value == _query) return;
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 180), () {
+      if (!mounted || value == _query) return;
+      setState(() => _query = value);
+    });
+  }
+
+  List<File> _filteredFiles(_LibraryData data) {
+    if (identical(_filteredData, data) &&
+        _filteredQuery == _query &&
+        _filteredFilter == _filter &&
+        _filteredFilesCache != null) {
+      return _filteredFilesCache!;
+    }
+    final files = data.files.where((file) {
+      final name = file.uri.pathSegments.last.toLowerCase();
+      if (_query.isNotEmpty && !name.contains(_query)) return false;
+      if (_filter != 'all' && _category(name) != _filter) {
+        return false;
+      }
+      return true;
+    }).toList(growable: false);
+    _filteredData = data;
+    _filteredQuery = _query;
+    _filteredFilter = _filter;
+    _filteredFilesCache = files;
+    return files;
   }
 
   void _onLockRequested() {
@@ -109,7 +152,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
   void _onSettingsChanged() {
     if (!mounted) return;
-    if (!SettingsService.instance.libraryLockEnabled && _locked) {
+    final lockEnabled = SettingsService.instance.libraryLockEnabled;
+    if (lockEnabled == _lockEnabled) return;
+    _lockEnabled = lockEnabled;
+    if (!lockEnabled && _locked) {
       setState(() => _locked = false);
     } else {
       setState(() {});
@@ -667,12 +713,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              leading: const Icon(Icons.drive_file_rename_outline_rounded),
+              leading: const HugeIcon(icon: HugeIcons.strokeRoundedFileEdit),
               title: const Text('Rename folder'),
               onTap: () => Navigator.of(sheetContext).pop('rename'),
             ),
             ListTile(
-              leading: Icon(Icons.delete_outline_rounded,
+              leading: HugeIcon(icon: HugeIcons.strokeRoundedDelete02,
                   color: context.palette.destructive),
               title: Text('Delete folder',
                   style: TextStyle(color: context.palette.destructive)),
@@ -802,7 +848,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.lock_rounded, size: 64, color: palette.foreground),
+                HugeIcon(icon: HugeIcons.strokeRoundedLocked, size: 64, color: palette.foreground),
                 const SizedBox(height: 18),
                 Text('Library is locked',
                     style: AppText.display(24, color: palette.foreground)),
@@ -824,7 +870,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 const SizedBox(height: 26),
                 FilledButton.icon(
                   onPressed: _authenticate,
-                  icon: const Icon(Icons.lock_open_rounded),
+                  icon: const HugeIcon(icon: HugeIcons.strokeRoundedLockOpen),
                   label: const Text('Unlock'),
                 ),
               ],
@@ -882,15 +928,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
                   : (_lastLoadedFolder == _folder && _lastLoaded != null
                       ? _lastLoaded!
                       : empty);
-              final query = _searchController.text.trim().toLowerCase();
-              final files = data.files.where((file) {
-                final name = file.uri.pathSegments.last.toLowerCase();
-                if (query.isNotEmpty && !name.contains(query)) return false;
-                if (_filter != 'all' && _category(name) != _filter) {
-                  return false;
-                }
-                return true;
-              }).toList(growable: false);
+              final query = _query;
+              final files = _filteredFiles(data);
               final selectedBytes = _selectedPaths.fold<int>(
                 0,
                 (sum, path) => sum + (data.sizeByPath[path] ?? 0),
@@ -936,7 +975,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                                       padding: const EdgeInsets.only(
                                           right: 6, top: 2),
                                       child: RoundIconButton(
-                                        icon: Icons.arrow_back_rounded,
+                                        icon: HugeIcons.strokeRoundedArrowLeft01,
                                         tooltip: 'Back',
                                         onPressed: _goUp,
                                       ),
@@ -966,7 +1005,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                                     Padding(
                                       padding: const EdgeInsets.only(right: 8),
                                       child: RoundIconButton(
-                                        icon: Icons.delete_outline_rounded,
+                                        icon: HugeIcons.strokeRoundedDelete02,
                                         tooltip: 'Delete folder',
                                         color: palette.destructive,
                                         onPressed: _deleteCurrentFolder,
@@ -976,7 +1015,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                                     Padding(
                                       padding: const EdgeInsets.only(right: 8),
                                       child: RoundIconButton(
-                                        icon: Icons.create_new_folder_outlined,
+                                        icon: HugeIcons.strokeRoundedFolderAdd,
                                         tooltip: 'New folder',
                                         onPressed: _createFolder,
                                       ),
@@ -986,8 +1025,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
                                       padding: const EdgeInsets.only(right: 8),
                                       child: RoundIconButton(
                                         icon: allVisibleSelected
-                                            ? Icons.deselect_rounded
-                                            : Icons.select_all_rounded,
+                                            ? HugeIcons.strokeRoundedSquare
+                                            : HugeIcons.strokeRoundedSelect01,
                                         tooltip: allVisibleSelected
                                             ? 'Deselect all'
                                             : 'Select all',
@@ -998,8 +1037,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
                                     ),
                                   RoundIconButton(
                                     icon: _selecting
-                                        ? Icons.check_rounded
-                                        : Icons.checklist_rounded,
+                                        ? HugeIcons.strokeRoundedTick02
+                                        : HugeIcons.strokeRoundedTaskDone01,
                                     tooltip: _selecting
                                         ? 'Done selecting'
                                         : 'Select files',
@@ -1019,8 +1058,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
                                 textInputAction: TextInputAction.search,
                                 decoration: InputDecoration(
                                   hintText: 'Search your files',
-                                  prefixIcon: Icon(
-                                    Icons.search_rounded,
+                                  prefixIcon: HugeIcon(icon: 
+                                    HugeIcons.strokeRoundedSearch01,
                                     color: palette.mutedForeground,
                                     size: 20,
                                   ),
@@ -1056,8 +1095,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
                         if (loading)
                           const SliverToBoxAdapter(
                             child: Padding(
-                              padding: EdgeInsets.symmetric(vertical: 48),
-                              child: Center(child: CircularProgressIndicator()),
+                              padding: EdgeInsets.fromLTRB(20, 24, 20, 32),
+                              child: SkeletonRows(count: 6),
                             ),
                           )
                         else if (files.isEmpty &&
@@ -1155,7 +1194,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                   padding: const EdgeInsets.fromLTRB(12, 12, 4, 12),
                   child: Row(
                     children: [
-                      Icon(Icons.folder_rounded,
+                      HugeIcon(icon: HugeIcons.strokeRoundedFolder02,
                           size: 22, color: AppColors.primary),
                       const SizedBox(width: 8),
                       Expanded(
@@ -1180,8 +1219,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
                     const BoxConstraints.tightFor(width: 40, height: 40),
                 padding: EdgeInsets.zero,
                 onPressed: () => _folderOptions(folder),
-                icon: Icon(
-                  Icons.more_vert_rounded,
+                icon: HugeIcon(icon: 
+                  HugeIcons.strokeRoundedMoreVertical,
                   size: 18,
                   color: palette.mutedForeground,
                 ),
@@ -1197,7 +1236,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
         padding: const EdgeInsets.only(top: 24),
         child: EmptyState(
           icon:
-              searching ? Icons.search_off_rounded : Icons.folder_open_rounded,
+              searching ? HugeIcons.strokeRoundedSearchRemove : HugeIcons.strokeRoundedFolderOpen,
           title: searching ? 'No matches' : 'Nothing saved yet',
           message: searching
               ? 'Try a different file name or filter.'
@@ -1248,7 +1287,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                       ),
                     ),
                     child: selected
-                        ? const Icon(Icons.check_rounded,
+                        ? const HugeIcon(icon: HugeIcons.strokeRoundedTick02,
                             size: 14, color: Colors.white)
                         : null,
                   ),
@@ -1264,14 +1303,14 @@ class _LibraryScreenState extends State<LibraryScreen> {
                           : 'document',
               file: isImage || isVideo ? file : null,
               size: 52,
-              fallback: Icon(
+              fallback: HugeIcon(icon: 
                 isVideo
-                    ? Icons.movie_outlined
+                    ? HugeIcons.strokeRoundedFilm01
                     : isImage
-                        ? Icons.image_outlined
+                        ? HugeIcons.strokeRoundedImage01
                         : isAudio
-                            ? Icons.music_note_rounded
-                            : Icons.insert_drive_file_outlined,
+                            ? HugeIcons.strokeRoundedMusicNote01
+                            : HugeIcons.strokeRoundedFile02,
                 color: palette.mutedForeground,
               ),
             ),
@@ -1299,7 +1338,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
             ),
             if (!_selecting)
               PopupMenuButton<String>(
-                icon: Icon(Icons.more_horiz_rounded,
+                icon: HugeIcon(icon: HugeIcons.strokeRoundedMoreHorizontal,
                     color: palette.mutedForeground),
                 onSelected: (value) {
                   if (value == 'play') _play(file);
@@ -1366,7 +1405,7 @@ class _StorageCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              Icon(Icons.sd_storage_outlined,
+              HugeIcon(icon: HugeIcons.strokeRoundedSdCard,
                   size: 18, color: palette.accentForeground),
               const SizedBox(width: 8),
               Expanded(
@@ -1495,7 +1534,7 @@ class _FilterPills extends StatelessWidget {
                     ),
                     child: Text(
                       '${option.$3}',
-                      style: AppText.body(10,
+                      style: AppText.body(11,
                           weight: FontWeight.w700,
                           color: selected
                               ? Colors.white
@@ -1587,35 +1626,35 @@ class _SelectionBar extends StatelessWidget {
           ),
           RoundIconButton(
             icon:
-                allSelected ? Icons.deselect_rounded : Icons.select_all_rounded,
+                allSelected ? HugeIcons.strokeRoundedSquare : HugeIcons.strokeRoundedSelect01,
             tooltip: allSelected ? 'Deselect all' : 'Select all',
             size: 38,
             onPressed: onSelectAll,
           ),
           const SizedBox(width: 4),
           RoundIconButton(
-            icon: Icons.photo_library_outlined,
+            icon: HugeIcons.strokeRoundedImage02,
             tooltip: 'Save to Gallery',
             size: 38,
             onPressed: onSave,
           ),
           const SizedBox(width: 4),
           RoundIconButton(
-            icon: Icons.drive_file_move_outline,
+            icon: HugeIcons.strokeRoundedArrowDataTransferHorizontal,
             tooltip: 'Move to folder',
             size: 38,
             onPressed: onMove,
           ),
           const SizedBox(width: 4),
           RoundIconButton(
-            icon: Icons.share_rounded,
+            icon: HugeIcons.strokeRoundedShare01,
             tooltip: 'Share selected',
             size: 38,
             onPressed: onShare,
           ),
           const SizedBox(width: 4),
           RoundIconButton(
-            icon: Icons.delete_outline_rounded,
+            icon: HugeIcons.strokeRoundedDelete02,
             tooltip: 'Delete selected',
             size: 38,
             color: palette.destructive,

@@ -1,3 +1,4 @@
+import 'package:hugeicons/hugeicons.dart';
 import 'dart:async';
 import 'dart:collection';
 import 'dart:convert';
@@ -1310,9 +1311,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen>
     }
     if (kind == 'image' &&
         ((width != null && height != null && width <= 1 && height <= 1) ||
-            RegExp(r'(?:pixel|beacon|tracker|spacer)(?:[./_-]|$)',
-                    caseSensitive: false)
-                .hasMatch(uri.path))) {
+            _pixelPathPattern.hasMatch(uri.path))) {
       return;
     }
 
@@ -1472,10 +1471,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen>
     // scan. Probing them again downloads/consumes the media link before the
     // user taps Download, which breaks one-time/signed URLs (HTTP 400).
     if (_mediaExtension(uri).isNotEmpty) return;
-    if (RegExp(
-      r'\.(png|jpe?g|gif|webp|avif|svg|ico|bmp|css|js|woff2?|ttf|otf|eot|html?)$',
-      caseSensitive: false,
-    ).hasMatch(uri.path)) {
+    if (_nonMediaAssetPattern.hasMatch(uri.path)) {
       return;
     }
     if (tab.probingUrls.contains(url) || tab.probingUrls.length >= 24) return;
@@ -1511,6 +1507,85 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen>
     r'(video|stream|media|play|live|audio|manifest|hls|dash|m3u8|mpd|playback|m4s|videoplayback)',
     caseSensitive: false,
   );
+  static final RegExp _pixelPathPattern = RegExp(
+    r'(?:pixel|beacon|tracker|spacer)(?:[./_-]|$)',
+    caseSensitive: false,
+  );
+  static final RegExp _nonMediaAssetPattern = RegExp(
+    r'\.(png|jpe?g|gif|webp|avif|svg|ico|bmp|css|js|woff2?|ttf|otf|eot|html?)$',
+    caseSensitive: false,
+  );
+  static final RegExp _genericStreamTitlePattern = RegExp(
+    r'^(master|index|playlist|manifest|stream|video|media|output|chunk|seg|segment)[-_]?\d*\.(m3u8|m3u|mpd|ts|m4s|mp4)$',
+  );
+  static final RegExp _wwwPrefix = RegExp(r'^www\.');
+  static final RegExp _privateIpv4 = RegExp(r'^172\.(1[6-9]|2\d|3[01])\.');
+  static final RegExp _nonAscii = RegExp(r'[^\x00-\x7F]');
+  static final RegExp _percentEscape = RegExp(
+    r'%(?:[0-9a-f]{2})',
+    caseSensitive: false,
+  );
+  static final RegExp _scriptAttribute = RegExp(r'on[a-z]{1,20}\s*=');
+  static final RegExp _junkImagePattern = RegExp(
+    r'/icons?/|/sprites?/|/buttons?/|/arrows?/|/logos?/|/avatars?/|'
+    r'rsrc\.php|thumbnail|_thumb\.|-thumb\.|_small\.|-small\.|'
+    r'placeholder|spinner|loading|tracking|analytics|doubleclick|'
+    r'googlesyndication|advert|banner[^/]*ad|favicon|emoji|'
+    r'checkmark|/24px|/16px|/32px|\.svg$|\.ico$',
+    caseSensitive: false,
+  );
+  static final RegExp _junkVideoPattern = RegExp(
+    r'/rsrc\.php|/emoji|/sticker|/reaction|/sprites?/|/ads?/|/advert|'
+    r'/preview|/placeholder|/loading|/pixel|/beacon|_thumb\.|-thumb\.',
+    caseSensitive: false,
+  );
+  static final RegExp _vimeoPath = RegExp(r'^/\d+|^/video/');
+  static final RegExp _dailymotionPath = RegExp(r'^/video/|^/embed/');
+  static final RegExp _twitchPath = RegExp(r'^/videos/|^/clip/');
+  static final RegExp _tiktokPath = RegExp(r'^/@[\w.-]+/video/');
+  static final RegExp _socialVideoPath =
+      RegExp(r'/watch/|/videos/|/reel/|/tv/|/status/');
+  static final RegExp _spotifyPath = RegExp(r'/track/|/episode/|/album/');
+  static final RegExp _googleDocsPath =
+      RegExp(r'^/document/|^/spreadsheets/|^/presentation/|^/viewer');
+  static final RegExp _googleDrivePath = RegExp(r'^/file/|^/viewer');
+  static final RegExp _dropboxPath = RegExp(r'^/s/');
+  static final RegExp _scribdPath = RegExp(r'^/document/|^/doc/');
+  static final RegExp _boxPath = RegExp(r'^/s/|^/file/');
+  static final RegExp _sharepointPath = RegExp(r'^/_layouts/|^/Documents/');
+  static const Set<String> _platformVideoHosts = {
+    'youtu.be',
+    'youtube.com',
+    'vimeo.com',
+    'player.vimeo.com',
+    'dailymotion.com',
+    'twitch.tv',
+    'clips.twitch.tv',
+    'tiktok.com',
+    'facebook.com',
+    'instagram.com',
+    'twitter.com',
+    'x.com',
+  };
+  static const Set<String> _platformAudioHosts = {
+    'spotify.com',
+    'open.spotify.com',
+    'soundcloud.com',
+    'bandcamp.com',
+    'mixcloud.com',
+    'audiomack.com',
+    'podcasts.apple.com',
+    'anchor.fm',
+  };
+  static const Set<String> _platformDocumentHosts = {
+    'docs.google.com',
+    'drive.google.com',
+    'dropbox.com',
+    'scribd.com',
+    'slideshare.net',
+    'issuu.com',
+    'box.com',
+  };
 
   bool _looksLikeStream(Uri uri) => _streamPathPattern.hasMatch(uri.path);
 
@@ -1583,9 +1658,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen>
         title == 'manifest') {
       return true;
     }
-    return RegExp(
-      r'^(master|index|playlist|manifest|stream|video|media|output|chunk|seg|segment)[-_]?\d*\.(m3u8|m3u|mpd|ts|m4s|mp4)$',
-    ).hasMatch(title);
+    return _genericStreamTitlePattern.hasMatch(title);
   }
 
   String _streamTitle(_BrowserTab tab, Uri uri, {String? fallback}) {
@@ -1807,14 +1880,14 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen>
         host.startsWith('192.168.') ||
         host.startsWith('127.') ||
         host.startsWith('169.254.') ||
-        RegExp(r'^172\.(1[6-9]|2\d|3[01])\.').hasMatch(host)) {
+        _privateIpv4.hasMatch(host)) {
       return 'Local network address · check source before downloading';
     }
     if (host.startsWith('xn--') ||
         host.split('.').any((label) => label.startsWith('xn--'))) {
       return 'Internationalized domain · check the address';
     }
-    if (RegExp(r'[^\x00-\x7F]').hasMatch(host)) {
+    if (_nonAscii.hasMatch(host)) {
       return 'Unicode domain · verify the spelling';
     }
     if (uri.queryParametersAll.length > 50) {
@@ -1854,11 +1927,8 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen>
     if (suspiciousTlds.contains(host.split('.').last)) {
       return 'This domain ending is often abused · check source';
     }
-    if (RegExp(r'%(?:[0-9a-f]{2})', caseSensitive: false)
-                .allMatches(uri.toString())
-                .length *
-            3 /
-            uri.toString().length >
+    final encodedUrl = uri.toString();
+    if (_percentEscape.allMatches(encodedUrl).length * 3 / encodedUrl.length >
         .3) {
       return 'Heavily encoded URL · check source';
     }
@@ -1868,7 +1938,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen>
     } catch (_) {}
     if (decodedUrl.contains('javascript:') ||
         decodedUrl.contains('<script') ||
-        RegExp(r'on[a-z]{1,20}\s*=').hasMatch(decodedUrl)) {
+        _scriptAttribute.hasMatch(decodedUrl)) {
       return 'URL contains script-like content · check source';
     }
     if (host == 'bit.ly' ||
@@ -1883,81 +1953,43 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen>
   }
 
   String? _platformType(Uri uri) {
-    final host = uri.host.toLowerCase().replaceFirst(RegExp(r'^www\.'), '');
+    final host = uri.host.toLowerCase().replaceFirst(_wwwPrefix, '');
     final path = '${uri.path}${uri.hasQuery ? '?${uri.query}' : ''}';
-    final videoHosts = {
-      'youtu.be',
-      'youtube.com',
-      'vimeo.com',
-      'player.vimeo.com',
-      'dailymotion.com',
-      'twitch.tv',
-      'clips.twitch.tv',
-      'tiktok.com',
-      'facebook.com',
-      'instagram.com',
-      'twitter.com',
-      'x.com',
-    };
-    final audioHosts = {
-      'spotify.com',
-      'open.spotify.com',
-      'soundcloud.com',
-      'bandcamp.com',
-      'mixcloud.com',
-      'audiomack.com',
-      'podcasts.apple.com',
-      'anchor.fm',
-    };
-    final documentHosts = {
-      'docs.google.com',
-      'drive.google.com',
-      'dropbox.com',
-      'scribd.com',
-      'slideshare.net',
-      'issuu.com',
-      'box.com',
-    };
-    if (videoHosts.contains(host)) {
+    if (_platformVideoHosts.contains(host)) {
       if (host == 'youtube.com' &&
           !(path.startsWith('/watch?') ||
               path.startsWith('/embed/') ||
               path.startsWith('/v/'))) return null;
-      if (host == 'vimeo.com' && !RegExp(r'^/\d+|^/video/').hasMatch(path))
+      if (host == 'vimeo.com' && !_vimeoPath.hasMatch(path)) return null;
+      if (host == 'dailymotion.com' && !_dailymotionPath.hasMatch(path)) {
         return null;
-      if (host == 'dailymotion.com' &&
-          !RegExp(r'^/video/|^/embed/').hasMatch(path)) return null;
-      if (host == 'twitch.tv' && !RegExp(r'^/videos/|^/clip/').hasMatch(path))
-        return null;
-      if (host == 'tiktok.com' && !RegExp(r'^/@[\w.-]+/video/').hasMatch(path))
-        return null;
+      }
+      if (host == 'twitch.tv' && !_twitchPath.hasMatch(path)) return null;
+      if (host == 'tiktok.com' && !_tiktokPath.hasMatch(path)) return null;
       if ((host == 'facebook.com' ||
               host == 'instagram.com' ||
               host == 'twitter.com' ||
               host == 'x.com') &&
-          !RegExp(r'/watch/|/videos/|/reel/|/tv/|/status/').hasMatch(path))
-        return null;
+          !_socialVideoPath.hasMatch(path)) return null;
       return 'video';
     }
-    if (audioHosts.contains(host) || host.endsWith('.bandcamp.com')) {
-      if (host == 'spotify.com' &&
-          !RegExp(r'/track/|/episode/|/album/').hasMatch(path)) return null;
+    if (_platformAudioHosts.contains(host) || host.endsWith('.bandcamp.com')) {
+      if (host == 'spotify.com' && !_spotifyPath.hasMatch(path)) return null;
       return 'audio';
     }
-    if (host == 'docs.google.com' &&
-        !RegExp(r'^/document/|^/spreadsheets/|^/presentation/|^/viewer')
-            .hasMatch(path)) return null;
-    if (host == 'drive.google.com' &&
-        !RegExp(r'^/file/|^/viewer').hasMatch(path)) return null;
-    if (host == 'dropbox.com' && !RegExp(r'^/s/').hasMatch(path)) return null;
-    if (host == 'scribd.com' && !RegExp(r'^/document/|^/doc/').hasMatch(path))
+    if (host == 'docs.google.com' && !_googleDocsPath.hasMatch(path)) {
       return null;
-    if (host == 'box.com' && !RegExp(r'^/s/|^/file/').hasMatch(path))
+    }
+    if (host == 'drive.google.com' && !_googleDrivePath.hasMatch(path)) {
       return null;
+    }
+    if (host == 'dropbox.com' && !_dropboxPath.hasMatch(path)) return null;
+    if (host == 'scribd.com' && !_scribdPath.hasMatch(path)) return null;
+    if (host == 'box.com' && !_boxPath.hasMatch(path)) return null;
     if (host.endsWith('.sharepoint.com') &&
-        !RegExp(r'^/_layouts/|^/Documents/').hasMatch(path)) return null;
-    if (documentHosts.contains(host) || host.endsWith('.sharepoint.com'))
-      return 'document';
+        !_sharepointPath.hasMatch(path)) return null;
+    if (_platformDocumentHosts.contains(host) ||
+        host.endsWith('.sharepoint.com')) return 'document';
     return null;
   }
 
@@ -1986,14 +2018,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen>
       return true;
     }
     final path = uri?.path.toLowerCase() ?? url.toLowerCase();
-    return RegExp(
-      r'/icons?/|/sprites?/|/buttons?/|/arrows?/|/logos?/|/avatars?/|'
-      r'rsrc\.php|thumbnail|_thumb\.|-thumb\.|_small\.|-small\.|'
-      r'placeholder|spinner|loading|tracking|analytics|doubleclick|'
-      r'googlesyndication|advert|banner[^/]*ad|favicon|emoji|'
-      r'checkmark|/24px|/16px|/32px|\.svg$|\.ico$',
-      caseSensitive: false,
-    ).hasMatch(path);
+    return _junkImagePattern.hasMatch(path);
   }
 
   bool _isJunkVideo(
@@ -2021,11 +2046,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen>
       return true;
     }
     final path = uri?.path.toLowerCase() ?? url.toLowerCase();
-    return RegExp(
-      r'/rsrc\.php|/emoji|/sticker|/reaction|/sprites?/|/ads?/|/advert|'
-      r'/preview|/placeholder|/loading|/pixel|/beacon|_thumb\.|-thumb\.',
-      caseSensitive: false,
-    ).hasMatch(path);
+    return _junkVideoPattern.hasMatch(path);
   }
 
   void _addCandidate(
@@ -2235,9 +2256,9 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen>
         .toString();
   }
 
-  Future<void> _scanPage(_BrowserTab tab, {bool deep = true}) async {
+  Future<int> _scanPage(_BrowserTab tab, {bool deep = true}) async {
     final controller = tab.controller;
-    if (controller == null || tab.scanning) return;
+    if (controller == null || tab.scanning) return 0;
     tab.scanning = true;
     try {
       final filterJunk = SettingsService.instance.filterJunkMedia;
@@ -2247,7 +2268,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen>
                 'window.__linkyFilterJunk = $filterJunk;\n${deep ? _monitorScanScript : _quickScanScript}',
           )
           .timeout(const Duration(seconds: 8), onTimeout: () => null);
-      if (result is! List) return;
+      if (result is! List) return 0;
       final before = tab.candidateKeys.length;
       for (final entry in result) {
         if (entry is! Map) continue;
@@ -2267,6 +2288,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen>
         );
       }
       final added = tab.candidateKeys.length - before;
+      tab.lastScanAdded = added;
       if (added > 0) {
         DetectionLogService.instance.log(
           'DOM',
@@ -2275,11 +2297,13 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen>
           detail: '${result.length} element(s) scanned · $added new',
         );
       }
+      return added;
     } catch (_) {
       // The page can navigate or close while a scan is in flight.
     } finally {
       tab.scanning = false;
     }
+    return 0;
   }
 
   void _onClickedLink(_BrowserTab tab, String message) {
@@ -2423,14 +2447,28 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen>
     tab.monitorTimer?.cancel();
     tab.monitorTimer = null;
     if (!mounted || !_appForeground || tab != _tab || tab.showHome) return;
-    _scanPage(tab);
-    tab.monitorTimer = Timer.periodic(
-      const Duration(seconds: 3),
-      (_) {
-        if (!mounted || !_appForeground || tab != _tab) return;
-        _scanPage(tab, deep: false);
-      },
-    );
+    unawaited(_scanPage(tab));
+    tab.monitorDelay = const Duration(milliseconds: 1200);
+    _scheduleMonitorTick(tab);
+  }
+
+  /// Scans quickly after activity and backs off up to 8 s when the page stops
+  /// producing new media, so idle pages stop burning CPU every few seconds.
+  void _scheduleMonitorTick(_BrowserTab tab) {
+    tab.monitorTimer?.cancel();
+    tab.monitorTimer = Timer(tab.monitorDelay, () async {
+      if (!mounted || !_appForeground || tab != _tab || tab.showHome) return;
+      await _scanPage(tab, deep: false);
+      if (tab.lastScanAdded > 0) {
+        tab.monitorDelay = const Duration(milliseconds: 1200);
+      } else {
+        final doubled = tab.monitorDelay * 2;
+        tab.monitorDelay = doubled > const Duration(seconds: 8)
+            ? const Duration(seconds: 8)
+            : doubled;
+      }
+      _scheduleMonitorTick(tab);
+    });
   }
 
   Future<void> _injectAdBlockStyles(
@@ -2482,7 +2520,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen>
     final firstHost = Uri.tryParse(first)?.host.toLowerCase() ?? '';
     final secondHost = Uri.tryParse(second)?.host.toLowerCase() ?? '';
     if (firstHost.isEmpty || secondHost.isEmpty) return false;
-    String bare(String host) => host.replaceFirst(RegExp(r'^www\.'), '');
+    String bare(String host) => host.replaceFirst(_wwwPrefix, '');
     String base(String host) {
       final parts = host.split('.');
       return parts.length >= 2
@@ -2674,7 +2712,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen>
                                 url: item.url,
                                 poster: item.thumbnail ?? _tab.videoPoster,
                                 size: 48,
-                                fallback: const Icon(Icons.movie_outlined,
+                                fallback: const HugeIcon(icon: HugeIcons.strokeRoundedFilm01,
                                     color: AppColors.forestMuted),
                               ),
                               const SizedBox(width: 10),
@@ -2696,7 +2734,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen>
                                       'PLAYING · Tap for download options',
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
-                                      style: AppText.label(9,
+                                      style: AppText.label(11,
                                           color: AppColors.forestAccent),
                                     ),
                                   ],
@@ -3696,15 +3734,15 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen>
                                                     _tab.videoPoster)
                                                 : item.thumbnail,
                                             size: 48,
-                                            fallback: Icon(item.type == 'image'
-                                                ? Icons.image_outlined
-                                                : Icons.movie_outlined),
+                                            fallback: HugeIcon(icon: item.type == 'image'
+                                                ? HugeIcons.strokeRoundedImage01
+                                                : HugeIcons.strokeRoundedFilm01),
                                           )
-                                        : Icon(item.type == 'audio'
-                                            ? Icons.audiotrack
+                                        : HugeIcon(icon: item.type == 'audio'
+                                            ? HugeIcons.strokeRoundedMusicNote01
                                             : item.type == 'document'
-                                                ? Icons.description_outlined
-                                                : Icons.movie_outlined),
+                                                ? HugeIcons.strokeRoundedFile02
+                                                : HugeIcons.strokeRoundedFilm01),
                                     title: Text(
                                         item.groupTitle ??
                                             item.title ??
@@ -3783,8 +3821,8 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen>
                                             tooltip: 'Preview stream',
                                             onPressed: () =>
                                                 _previewCandidate(item),
-                                            icon: const Icon(
-                                              Icons.play_circle_outline,
+                                            icon: const HugeIcon(icon: 
+                                              HugeIcons.strokeRoundedPlayCircle,
                                             ),
                                           ),
                                         IconButton(
@@ -3801,7 +3839,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen>
                                                   child:
                                                       CircularProgressIndicator(
                                                           strokeWidth: 2))
-                                              : const Icon(Icons.download),
+                                              : const HugeIcon(icon: HugeIcons.strokeRoundedDownload01),
                                         ),
                                       ],
                                     ),
@@ -3849,7 +3887,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen>
                             child: Text('Tabs', style: AppText.heading(18))),
                         TextButton.icon(
                           onPressed: () => setSheetState(() => _addTab()),
-                          icon: const Icon(Icons.add_rounded, size: 18),
+                          icon: const HugeIcon(icon: HugeIcons.strokeRoundedAdd01, size: 18),
                           label: const Text('New tab'),
                         ),
                       ],
@@ -3859,8 +3897,8 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen>
                     ListTile(
                       selected: i == _activeIndex,
                       selectedTileColor: palette.accent,
-                      leading: Icon(
-                        Icons.public_rounded,
+                      leading: HugeIcon(icon: 
+                        HugeIcons.strokeRoundedGlobe,
                         color: i == _activeIndex
                             ? AppColors.primary
                             : palette.mutedForeground,
@@ -3881,7 +3919,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen>
                         onPressed: () => setSheetState(() {
                           _closeTab(i);
                         }),
-                        icon: const Icon(Icons.close_rounded, size: 18),
+                        icon: const HugeIcon(icon: HugeIcons.strokeRoundedCancel01, size: 18),
                       ),
                       onTap: () {
                         setSheetState(() => _selectTab(i));
@@ -3890,10 +3928,10 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen>
                     ),
                   Divider(height: 20, color: palette.border),
                   ListTile(
-                    leading: Icon(
+                    leading: HugeIcon(icon: 
                       _tab.desktopMode
-                          ? Icons.phone_iphone_rounded
-                          : Icons.desktop_windows_rounded,
+                          ? HugeIcons.strokeRoundedSmartPhone01
+                          : HugeIcons.strokeRoundedComputer,
                     ),
                     title: Text(
                       _tab.desktopMode
@@ -3906,11 +3944,11 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen>
                     },
                   ),
                   ListTile(
-                    leading: Icon(
+                    leading: HugeIcon(icon: 
                       BookmarksService.instance
                               .isBookmarked(_addressController.text.trim())
-                          ? Icons.bookmark_rounded
-                          : Icons.bookmark_border_rounded,
+                          ? HugeIcons.strokeRoundedBookmark02
+                          : HugeIcons.strokeRoundedBookmark01,
                     ),
                     title: Text(
                       BookmarksService.instance
@@ -3924,7 +3962,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen>
                     },
                   ),
                   ListTile(
-                    leading: const Icon(Icons.settings_outlined),
+                    leading: const HugeIcon(icon: HugeIcons.strokeRoundedSettings01),
                     title: const Text('Browser settings'),
                     onTap: () {
                       Navigator.of(sheetContext).pop();
@@ -4488,29 +4526,29 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen>
                       ),
                     ),
                     ListTile(
-                      leading: const Icon(Icons.history),
+                      leading: const HugeIcon(icon: HugeIcons.strokeRoundedHistory),
                       title: const Text('History'),
                       onTap: () => open(const HistoryScreen()),
                     ),
                     ListTile(
-                      leading: const Icon(Icons.bookmark_border),
+                      leading: const HugeIcon(icon: HugeIcons.strokeRoundedBookmark01),
                       title: const Text('Bookmarks'),
                       onTap: () => open(const BookmarksScreen()),
                     ),
                     ListTile(
-                      leading: const Icon(Icons.download_outlined),
+                      leading: const HugeIcon(icon: HugeIcons.strokeRoundedDownload02),
                       title: const Text('Downloads'),
                       onTap: () => open(const DownloadsScreen()),
                     ),
                     ListTile(
-                      leading: const Icon(Icons.tune),
+                      leading: const HugeIcon(icon: HugeIcons.strokeRoundedSlidersHorizontal),
                       title: const Text('All settings'),
                       subtitle:
                           const Text('Detection, storage, proxy, DNS and more'),
                       onTap: () => open(const SettingsScreen()),
                     ),
                     ListTile(
-                      leading: const Icon(Icons.cleaning_services_outlined),
+                      leading: const HugeIcon(icon: HugeIcons.strokeRoundedClean),
                       title: const Text('Clear browsing data'),
                       subtitle:
                           const Text('Cookies, cache, site data and history'),
@@ -4520,7 +4558,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen>
                       },
                     ),
                     ListTile(
-                      leading: const Icon(Icons.search),
+                      leading: const HugeIcon(icon: HugeIcons.strokeRoundedSearch01),
                       title:
                           Text('Search engine: ${settings.searchEngineName}'),
                       subtitle:
@@ -4529,7 +4567,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen>
                     ),
                     const Divider(),
                     SwitchListTile(
-                      secondary: const Icon(Icons.shield_outlined),
+                      secondary: const HugeIcon(icon: HugeIcons.strokeRoundedShield01),
                       value: settings.adBlockEnabled,
                       title: const Text('Ad blocker'),
                       subtitle: const Text(
@@ -4541,7 +4579,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen>
                       },
                     ),
                     SwitchListTile(
-                      secondary: const Icon(Icons.block),
+                      secondary: const HugeIcon(icon: HugeIcons.strokeRoundedBlocked),
                       value: settings.blockPopups,
                       title: const Text('Block pop-ups and redirect ads'),
                       subtitle:
@@ -4552,7 +4590,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen>
                       },
                     ),
                     SwitchListTile(
-                      secondary: const Icon(Icons.open_in_new),
+                      secondary: const HugeIcon(icon: HugeIcons.strokeRoundedArrowUpRight01),
                       value: settings.redirectPromptEnabled,
                       title: const Text('Ask before cross-site redirects'),
                       onChanged: (value) async {
@@ -4561,7 +4599,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen>
                       },
                     ),
                     SwitchListTile(
-                      secondary: const Icon(Icons.play_circle_outline),
+                      secondary: const HugeIcon(icon: HugeIcons.strokeRoundedPlayCircle),
                       value: settings.onlyPlayingVideo,
                       title: const Text('Only show the playing video'),
                       onChanged: (value) async {
@@ -4570,7 +4608,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen>
                       },
                     ),
                     SwitchListTile(
-                      secondary: const Icon(Icons.filter_alt_outlined),
+                      secondary: const HugeIcon(icon: HugeIcons.strokeRoundedFilter),
                       value: settings.filterJunkMedia,
                       title: const Text('Filter junk media'),
                       onChanged: (value) async {
@@ -4579,7 +4617,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen>
                       },
                     ),
                     SwitchListTile(
-                      secondary: const Icon(Icons.desktop_windows_outlined),
+                      secondary: const HugeIcon(icon: HugeIcons.strokeRoundedComputer),
                       value: _tab.desktopMode,
                       title: const Text('Desktop site'),
                       subtitle:
@@ -4727,19 +4765,19 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen>
     final uri = tab.showHome ? null : _webUri(tab.url);
     final security = uri == null ? null : _securityHint(uri);
     final secure = uri != null && uri.scheme.toLowerCase() == 'https';
-    final IconData leadingIcon;
+    final List<List<dynamic>> leadingIcon;
     final Color leadingColor;
     if (uri == null) {
-      leadingIcon = Icons.public_rounded;
+      leadingIcon = HugeIcons.strokeRoundedGlobe;
       leadingColor = AppColors.forestMuted;
     } else if (security != null) {
-      leadingIcon = Icons.warning_amber_rounded;
+      leadingIcon = HugeIcons.strokeRoundedAlert02;
       leadingColor = AppColors.primary;
     } else if (secure) {
-      leadingIcon = Icons.lock_rounded;
+      leadingIcon = HugeIcons.strokeRoundedLocked;
       leadingColor = AppColors.forestAccent;
     } else {
-      leadingIcon = Icons.public_rounded;
+      leadingIcon = HugeIcons.strokeRoundedGlobe;
       leadingColor = AppColors.forestMuted;
     }
     return Column(
@@ -4766,7 +4804,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen>
                                 : secure
                                     ? 'Secure connection'
                                     : 'Not secure'),
-                        child: Icon(leadingIcon, size: 15, color: leadingColor),
+                        child: HugeIcon(icon: leadingIcon, size: 15, color: leadingColor),
                       ),
                       const SizedBox(width: 8),
                       Expanded(
@@ -4802,10 +4840,10 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen>
                             _webController?.reload();
                           }
                         },
-                        icon: Icon(
+                        icon: HugeIcon(icon: 
                           tab.loading
-                              ? Icons.close_rounded
-                              : Icons.refresh_rounded,
+                              ? HugeIcons.strokeRoundedCancel01
+                              : HugeIcons.strokeRoundedRefresh,
                           size: 17,
                           color: AppColors.forestMuted,
                         ),
@@ -4819,8 +4857,8 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen>
                 tooltip: 'Close browser',
                 visualDensity: VisualDensity.compact,
                 onPressed: _closeBrowser,
-                icon: const Icon(
-                  Icons.close_rounded,
+                icon: const HugeIcon(icon: 
+                  HugeIcons.strokeRoundedCancel01,
                   size: 20,
                   color: AppColors.forestMuted,
                 ),
@@ -4865,12 +4903,12 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen>
         child: Row(
           children: [
             _toolButton(
-              icon: Icons.arrow_back_rounded,
+              icon: HugeIcons.strokeRoundedArrowLeft01,
               tooltip: 'Back',
               onTap: _handleBack,
             ),
             _toolButton(
-              icon: Icons.arrow_forward_rounded,
+              icon: HugeIcons.strokeRoundedArrowRight01,
               tooltip: 'Forward',
               onTap: _tab.canGoForward
                   ? () async {
@@ -4880,15 +4918,15 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen>
                   : null,
             ),
             _toolButton(
-              icon: Icons.home_rounded,
+              icon: HugeIcons.strokeRoundedHome02,
               tooltip: 'Start page',
               highlighted: _tab.showHome,
               onTap: _goHome,
             ),
             _toolButton(
               icon: _tab.desktopMode
-                  ? Icons.phone_iphone_rounded
-                  : Icons.desktop_windows_rounded,
+                  ? HugeIcons.strokeRoundedSmartPhone01
+                  : HugeIcons.strokeRoundedComputer,
               tooltip: _tab.desktopMode
                   ? 'Switch to mobile site'
                   : 'Switch to desktop site',
@@ -4896,14 +4934,14 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen>
               onTap: _toggleDesktopMode,
             ),
             _toolButton(
-              icon: Icons.download_rounded,
+              icon: HugeIcons.strokeRoundedDownload01,
               tooltip: 'Media found on this page',
               highlighted: true,
               badge: _candidates.isEmpty ? null : '${_candidates.length}',
               onTap: _candidates.isEmpty ? null : _showCandidates,
             ),
             _toolButton(
-              icon: Icons.filter_none_rounded,
+              icon: HugeIcons.strokeRoundedSquare,
               tooltip: 'Tabs',
               badge: '${_tabs.length}',
               onTap: _showTabsSheet,
@@ -4934,7 +4972,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen>
   }
 
   Widget _toolButton({
-    required IconData icon,
+    required List<List<dynamic>> icon,
     required String tooltip,
     required VoidCallback? onTap,
     bool highlighted = false,
@@ -4959,7 +4997,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen>
                   child: SizedBox(
                     width: 44,
                     height: 44,
-                    child: Icon(
+                    child: HugeIcon(icon: 
                       icon,
                       size: 20,
                       color: !enabled
@@ -4987,7 +5025,7 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen>
                   alignment: Alignment.center,
                   child: Text(
                     badge,
-                    style: AppText.body(9,
+                    style: AppText.body(11,
                         weight: FontWeight.w800, color: Colors.white),
                   ),
                 ),
@@ -5024,12 +5062,12 @@ class _MediaBrowserScreenState extends State<MediaBrowserScreen>
                 dense: true,
                 iconColor: AppColors.forestAccent,
                 textColor: AppColors.forestText,
-                leading: Icon(
+                leading: HugeIcon(icon: 
                   suggestion.source == 'History'
-                      ? Icons.history_rounded
+                      ? HugeIcons.strokeRoundedHistory
                       : suggestion.source == 'Bookmark'
-                          ? Icons.bookmark_outline_rounded
-                          : Icons.public_rounded,
+                          ? HugeIcons.strokeRoundedBookmark02
+                          : HugeIcons.strokeRoundedGlobe,
                   color: AppColors.forestAccent,
                 ),
                 title: Text(
@@ -5165,6 +5203,8 @@ class _BrowserTab {
   final Map<String, MediaItem> candidates = {};
   final Map<String, String> candidateKeys = {};
   Timer? monitorTimer;
+  Duration monitorDelay = const Duration(milliseconds: 1200);
+  int lastScanAdded = 0;
   double progress = 0;
   bool loading = false;
   bool canGoBack = false;
@@ -5300,10 +5340,10 @@ class _CapsuleToast extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(
+          HugeIcon(icon: 
             item.error
-                ? Icons.error_outline_rounded
-                : Icons.download_done_rounded,
+                ? HugeIcons.strokeRoundedAlertCircle
+                : HugeIcons.strokeRoundedDownload04,
             size: 17,
             color: Colors.white,
           ),

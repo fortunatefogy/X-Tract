@@ -1,3 +1,4 @@
+import 'package:hugeicons/hugeicons.dart';
 import 'package:flutter/material.dart';
 
 import '../../services/detection_log_service.dart';
@@ -28,7 +29,7 @@ class DetectionLogsScreen extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     RoundIconButton(
-                      icon: Icons.arrow_back_rounded,
+                      icon: HugeIcons.strokeRoundedArrowLeft01,
                       tooltip: 'Back',
                       size: 40,
                       onPressed: () => Navigator.of(context).maybePop(),
@@ -51,7 +52,7 @@ class DetectionLogsScreen extends StatelessWidget {
                       ),
                     ),
                     RoundIconButton(
-                      icon: Icons.delete_sweep_outlined,
+                      icon: HugeIcons.strokeRoundedDelete02,
                       tooltip: 'Clear logs',
                       color: palette.destructive,
                       onPressed: entries.isEmpty ? null : service.clear,
@@ -63,7 +64,7 @@ class DetectionLogsScreen extends StatelessWidget {
                   const Padding(
                     padding: EdgeInsets.only(top: 24),
                     child: EmptyState(
-                      icon: Icons.radar_rounded,
+                      icon: HugeIcons.strokeRoundedRadar01,
                       title: 'No detection activity',
                       message:
                           'Extraction and detection events will show up here as you browse.',
@@ -85,7 +86,7 @@ class DetectionLogsScreen extends StatelessWidget {
                                 color: palette.accent,
                                 borderRadius: BorderRadius.circular(12),
                               ),
-                              child: Icon(Icons.travel_explore_rounded,
+                              child: HugeIcon(icon: HugeIcons.strokeRoundedGlobe,
                                   size: 19,
                                   color: palette.accentForeground),
                             ),
@@ -125,7 +126,7 @@ class DetectionLogsScreen extends StatelessWidget {
                             const SizedBox(width: 8),
                             Text(
                               _time(entry.time),
-                              style: AppText.body(10,
+                              style: AppText.body(11,
                                   weight: FontWeight.w600,
                                   color: palette.mutedForeground),
                             ),

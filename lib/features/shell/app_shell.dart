@@ -1,3 +1,4 @@
+import 'package:hugeicons/hugeicons.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -133,6 +134,8 @@ class CometBottomBar extends StatefulWidget {
 }
 
 class _CometBottomBarState extends State<CometBottomBar> {
+  int _activeDownloads = -1;
+
   @override
   void initState() {
     super.initState();
@@ -146,20 +149,23 @@ class _CometBottomBarState extends State<CometBottomBar> {
   }
 
   void _onDownloadsChanged() {
-    if (mounted) setState(() {});
+    final count = DownloadService.instance.activeCount;
+    if (!mounted || count == _activeDownloads) return;
+    _activeDownloads = count;
+    setState(() {});
   }
 
-  static const _items = <(IconData, IconData, String)>[
-    (Icons.home_outlined, Icons.home_rounded, 'Home'),
-    (Icons.download_outlined, Icons.download_rounded, 'Downloads'),
-    (Icons.folder_outlined, Icons.folder_rounded, 'Library'),
-    (Icons.settings_outlined, Icons.settings_rounded, 'Settings'),
+  static const _items = <(List<List<dynamic>>, List<List<dynamic>>, String)>[
+    (HugeIcons.strokeRoundedHome01, HugeIcons.strokeRoundedHome02, 'Home'),
+    (HugeIcons.strokeRoundedDownload02, HugeIcons.strokeRoundedDownload01, 'Downloads'),
+    (HugeIcons.strokeRoundedFolder01, HugeIcons.strokeRoundedFolder02, 'Library'),
+    (HugeIcons.strokeRoundedSettings01, HugeIcons.strokeRoundedSettings02, 'Settings'),
   ];
 
   @override
   Widget build(BuildContext context) {
     final palette = context.palette;
-    final activeDownloads = DownloadService.instance.active.length;
+    final activeDownloads = DownloadService.instance.activeCount;
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
       child: SafeArea(
@@ -204,8 +210,8 @@ class _NavItem extends StatelessWidget {
     required this.onTap,
   });
 
-  final IconData icon;
-  final IconData activeIcon;
+  final List<List<dynamic>> icon;
+  final List<List<dynamic>> activeIcon;
   final String label;
   final bool selected;
   final int badge;
@@ -241,7 +247,7 @@ class _NavItem extends StatelessWidget {
                       color: selected ? palette.accent : Colors.transparent,
                       borderRadius: BorderRadius.circular(11),
                     ),
-                    child: Icon(
+                    child: HugeIcon(icon: 
                       selected ? activeIcon : icon,
                       size: 19,
                       color: color,
@@ -263,7 +269,7 @@ class _NavItem extends StatelessWidget {
                         ),
                         child: Text(
                           '$badge',
-                          style: AppText.body(9,
+                          style: AppText.body(11,
                               weight: FontWeight.w800, color: Colors.white),
                         ),
                       ),

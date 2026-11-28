@@ -1,3 +1,4 @@
+import 'package:hugeicons/hugeicons.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -246,7 +247,7 @@ class _SharePopupScreenState extends State<SharePopupScreen>
                     color: AppColors.primary,
                     shape: BoxShape.circle,
                   ),
-                  child: const Icon(Icons.link_rounded,
+                  child: const HugeIcon(icon: HugeIcons.strokeRoundedLink01,
                       size: 20, color: Colors.white),
                 ),
                 const SizedBox(width: 10),
@@ -269,7 +270,7 @@ class _SharePopupScreenState extends State<SharePopupScreen>
                 ),
                 IconButton(
                   onPressed: widget.onClose,
-                  icon: const Icon(Icons.close_rounded),
+                  icon: const HugeIcon(icon: HugeIcons.strokeRoundedCancel01),
                   tooltip: 'Close',
                 ),
               ],
@@ -286,7 +287,7 @@ class _SharePopupScreenState extends State<SharePopupScreen>
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.info_outline_rounded,
+                  HugeIcon(icon: HugeIcons.strokeRoundedInformationCircle,
                       color: AppColors.amber, size: 32),
                   const SizedBox(height: 8),
                   Text(
@@ -304,9 +305,9 @@ class _SharePopupScreenState extends State<SharePopupScreen>
                         child: const Text('Scan again'),
                       ),
                       if (_primaryUrl != null && widget.onOpenBrowser != null)
-                        FilledButton.tonalIcon(
+                        FilledButton.tonalIcon( 
                           onPressed: _openBrowser,
-                          icon: const Icon(Icons.public_rounded, size: 18),
+                          icon: const HugeIcon(icon: HugeIcons.strokeRoundedGlobe, size: 18),
                           label: const Text('Open in Comet browser'),
                         ),
                     ],
@@ -331,7 +332,7 @@ class _SharePopupScreenState extends State<SharePopupScreen>
                   ),
                   child: Row(
                     children: [
-                      Icon(Icons.info_outline_rounded,
+                      HugeIcon(icon: HugeIcons.strokeRoundedInformationCircle,
                           color: AppColors.amber, size: 18),
                       const SizedBox(width: 8),
                       Expanded(
@@ -408,7 +409,7 @@ class _SharePopupScreenState extends State<SharePopupScreen>
                               child: CircularProgressIndicator(
                                   strokeWidth: 2, color: Colors.white),
                             )
-                          : const Icon(Icons.download_rounded, size: 18),
+                          : const HugeIcon(icon: HugeIcons.strokeRoundedDownload01, size: 18),
                       label: Text(
                         chosenCount == 0
                             ? 'Select media to download'
@@ -474,14 +475,14 @@ class _SharePopupScreenState extends State<SharePopupScreen>
                 poster: item.thumbnail,
                 headers: item.requestHeaders,
                 size: 48,
-                fallback: Icon(
+                fallback: HugeIcon(icon: 
                   item.type == 'image'
-                      ? Icons.image_outlined
+                      ? HugeIcons.strokeRoundedImage01
                       : item.type == 'audio'
-                          ? Icons.audiotrack_rounded
+                          ? HugeIcons.strokeRoundedMusicNote01
                           : item.type == 'document'
-                              ? Icons.description_outlined
-                              : Icons.movie_outlined,
+                              ? HugeIcons.strokeRoundedFile02
+                              : HugeIcons.strokeRoundedFilm01,
                   color: palette.mutedForeground,
                 ),
               ),
@@ -507,12 +508,12 @@ class _SharePopupScreenState extends State<SharePopupScreen>
                 ),
               ),
               const SizedBox(width: 8),
-              Icon(
+              HugeIcon(icon: 
                 !enabled
-                    ? Icons.lock_outline_rounded
+                    ? HugeIcons.strokeRoundedLock
                     : selected
-                        ? Icons.check_circle_rounded
-                        : Icons.radio_button_unchecked_rounded,
+                        ? HugeIcons.strokeRoundedCheckmarkCircle02
+                        : HugeIcons.strokeRoundedCircle,
                 size: 22,
                 color: !enabled
                     ? palette.mutedForeground
@@ -616,7 +617,7 @@ class _ManualLinkInputState extends State<_ManualLinkInput> {
             onSubmitted: widget.onSubmit,
             decoration: InputDecoration(
               hintText: 'Paste a link to scan',
-              prefixIcon: Icon(Icons.link_rounded,
+              prefixIcon: HugeIcon(icon: HugeIcons.strokeRoundedLink01,
                   size: 18, color: palette.mutedForeground),
             ),
           ),
@@ -632,7 +633,7 @@ class _ManualLinkInputState extends State<_ManualLinkInput> {
             }
           },
           icon:
-              Icon(Icons.content_paste_rounded, color: palette.mutedForeground),
+              HugeIcon(icon: HugeIcons.strokeRoundedClipboard, color: palette.mutedForeground),
         ),
         FilledButton(
           onPressed: () => widget.onSubmit(_controller.text),

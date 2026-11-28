@@ -60,6 +60,7 @@ abstract class LinkyFlutterActivity : FlutterFragmentActivity() {
     private var extractorChannel: MethodChannel? = null
     private val extractorExecutor = Executors.newSingleThreadExecutor()
     private val thumbnailExecutor = Executors.newFixedThreadPool(2)
+    private val mediaExecutor = Executors.newFixedThreadPool(4)
 
     protected open val shareModeName: String get() = "main"
     protected open val supportsShare: Boolean get() = false
@@ -85,6 +86,7 @@ abstract class LinkyFlutterActivity : FlutterFragmentActivity() {
         extractorChannel = null
         extractorExecutor.shutdownNow()
         thumbnailExecutor.shutdownNow()
+        mediaExecutor.shutdownNow()
         super.onDestroy()
     }
 
@@ -310,29 +312,35 @@ abstract class LinkyFlutterActivity : FlutterFragmentActivity() {
                                 null,
                             )
                         } else {
-                            try {
-                                val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
-                                cipher.init(
-                                    Cipher.DECRYPT_MODE,
-                                    SecretKeySpec(key, "AES"),
-                                    IvParameterSpec(iv),
-                                )
-                                result.success(cipher.doFinal(data))
-                            } catch (error: Exception) {
+                            mediaExecutor.execute {
                                 try {
-                                    val cipher = Cipher.getInstance("AES/CBC/NoPadding")
+                                    val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
                                     cipher.init(
                                         Cipher.DECRYPT_MODE,
                                         SecretKeySpec(key, "AES"),
                                         IvParameterSpec(iv),
                                     )
-                                    result.success(cipher.doFinal(data))
-                                } catch (fallback: Exception) {
-                                    result.error(
-                                        "decrypt_failed",
-                                        fallback.message ?: "AES-128 decryption failed.",
-                                        null,
-                                    )
+                                    val decrypted = cipher.doFinal(data)
+                                    runOnUiThread { result.success(decrypted) }
+                                } catch (error: Exception) {
+                                    try {
+                                        val cipher = Cipher.getInstance("AES/CBC/NoPadding")
+                                        cipher.init(
+                                            Cipher.DECRYPT_MODE,
+                                            SecretKeySpec(key, "AES"),
+                                            IvParameterSpec(iv),
+                                        )
+                                        val decrypted = cipher.doFinal(data)
+                                        runOnUiThread { result.success(decrypted) }
+                                    } catch (fallback: Exception) {
+                                        runOnUiThread {
+                                            result.error(
+                                                "decrypt_failed",
+                                                fallback.message ?: "AES-128 decryption failed.",
+                                                null,
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -347,15 +355,19 @@ abstract class LinkyFlutterActivity : FlutterFragmentActivity() {
                                 null,
                             )
                         } else {
-                            try {
-                                MediaMuxerHelper.remux(inputPath, outputPath)
-                                result.success(outputPath)
-                            } catch (error: Exception) {
-                                result.error(
-                                    "remux_failed",
-                                    error.message ?: "The file could not be remuxed.",
-                                    null,
-                                )
+                            mediaExecutor.execute {
+                                try {
+                                    MediaMuxerHelper.remux(inputPath, outputPath)
+                                    runOnUiThread { result.success(outputPath) }
+                                } catch (error: Exception) {
+                                    runOnUiThread {
+                                        result.error(
+                                            "remux_failed",
+                                            error.message ?: "The file could not be remuxed.",
+                                            null,
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -369,15 +381,19 @@ abstract class LinkyFlutterActivity : FlutterFragmentActivity() {
                                 null,
                             )
                         } else {
-                            try {
-                                MediaMuxerHelper.extractAudio(inputPath, outputPath)
-                                result.success(outputPath)
-                            } catch (error: Exception) {
-                                result.error(
-                                    "extract_audio_failed",
-                                    error.message ?: "The audio track could not be extracted.",
-                                    null,
-                                )
+                            mediaExecutor.execute {
+                                try {
+                                    MediaMuxerHelper.extractAudio(inputPath, outputPath)
+                                    runOnUiThread { result.success(outputPath) }
+                                } catch (error: Exception) {
+                                    runOnUiThread {
+                                        result.error(
+                                            "extract_audio_failed",
+                                            error.message ?: "The audio track could not be extracted.",
+                                            null,
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -392,15 +408,19 @@ abstract class LinkyFlutterActivity : FlutterFragmentActivity() {
                                 null,
                             )
                         } else {
-                            try {
-                                MediaMuxerHelper.mux(videoPath, audioPath, outputPath)
-                                result.success(outputPath)
-                            } catch (error: Exception) {
-                                result.error(
-                                    "mux_failed",
-                                    error.message ?: "The tracks could not be merged.",
-                                    null,
-                                )
+                            mediaExecutor.execute {
+                                try {
+                                    MediaMuxerHelper.mux(videoPath, audioPath, outputPath)
+                                    runOnUiThread { result.success(outputPath) }
+                                } catch (error: Exception) {
+                                    runOnUiThread {
+                                        result.error(
+                                            "mux_failed",
+                                            error.message ?: "The tracks could not be merged.",
+                                            null,
+                                        )
+                                    }
+                                }
                             }
                         }
                     }

@@ -1,8 +1,10 @@
+import 'package:hugeicons/hugeicons.dart';
 import 'package:flutter/material.dart';
 
 import '../../services/library_folders.dart';
 import '../../services/settings_service.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/skeleton.dart';
 
 /// Shows the folder downloads will be saved to and lets the user change it.
 /// Used inside download sheets so the destination is visible before saving.
@@ -88,12 +90,12 @@ class _FolderSelectorState extends State<FolderSelector> {
     AppPalette palette, {
     required String label,
     required bool active,
-    IconData icon = Icons.folder_rounded,
+    List<List<dynamic>> icon = HugeIcons.strokeRoundedFolder02,
     double indent = 0,
   }) {
     return Row(
       children: [
-        Icon(
+        HugeIcon(icon: 
           icon,
           size: 17,
           color: active ? AppColors.primary : palette.mutedForeground,
@@ -112,7 +114,7 @@ class _FolderSelectorState extends State<FolderSelector> {
           ),
         ),
         if (active)
-          Icon(Icons.check_rounded, size: 17, color: AppColors.primary),
+          HugeIcon(icon: HugeIcons.strokeRoundedTick02, size: 17, color: AppColors.primary),
       ],
     );
   }
@@ -139,7 +141,7 @@ class _FolderSelectorState extends State<FolderSelector> {
                 palette,
                 label: 'Library (root)',
                 active: folder.isEmpty,
-                icon: Icons.folder_outlined,
+                icon: HugeIcons.strokeRoundedFolder01,
               ),
             ),
             for (final item in _folders)
@@ -161,7 +163,7 @@ class _FolderSelectorState extends State<FolderSelector> {
                 palette,
                 label: 'New folder',
                 active: false,
-                icon: Icons.create_new_folder_outlined,
+                icon: HugeIcons.strokeRoundedFolderAdd,
               ),
             ),
           ],
@@ -175,7 +177,7 @@ class _FolderSelectorState extends State<FolderSelector> {
             ),
             child: Row(
               children: [
-                Icon(Icons.folder_outlined, size: 17, color: AppColors.primary),
+                HugeIcon(icon: HugeIcons.strokeRoundedFolder01, size: 17, color: AppColors.primary),
                 const SizedBox(width: 8),
                 Text(
                   'Save to',
@@ -191,7 +193,7 @@ class _FolderSelectorState extends State<FolderSelector> {
                         weight: FontWeight.w700, color: palette.foreground),
                   ),
                 ),
-                Icon(Icons.expand_more_rounded,
+                HugeIcon(icon: HugeIcons.strokeRoundedArrowDown01,
                     size: 18, color: palette.mutedForeground),
               ],
             ),
@@ -290,8 +292,8 @@ class _FolderPickerDialogState extends State<_FolderPickerDialog> {
         width: double.maxFinite,
         child: folders == null
             ? const Padding(
-                padding: EdgeInsets.all(24),
-                child: Center(child: CircularProgressIndicator()),
+                padding: EdgeInsets.all(12),
+                child: SkeletonRows(count: 4, height: 44),
               )
             : ListView(
                 shrinkWrap: true,
@@ -300,14 +302,14 @@ class _FolderPickerDialogState extends State<_FolderPickerDialog> {
                     context,
                     label: 'Library (root)',
                     value: '',
-                    icon: Icons.folder_outlined,
+                    icon: HugeIcons.strokeRoundedFolder01,
                   ),
                   for (final folder in folders)
                     _option(
                       context,
                       label: folder.name,
                       value: folder.relativePath,
-                      icon: Icons.folder_rounded,
+                      icon: HugeIcons.strokeRoundedFolder02,
                       indent: (folder.depth - 1) * 16.0,
                     ),
                   if (folders.isEmpty)
@@ -325,7 +327,7 @@ class _FolderPickerDialogState extends State<_FolderPickerDialog> {
                   TextButton.icon(
                     onPressed: _creating ? null : _createFolder,
                     icon:
-                        const Icon(Icons.create_new_folder_outlined, size: 18),
+                        const HugeIcon(icon: HugeIcons.strokeRoundedFolderAdd, size: 18),
                     label: const Text('New folder'),
                   ),
                 ],
@@ -348,7 +350,7 @@ class _FolderPickerDialogState extends State<_FolderPickerDialog> {
     BuildContext context, {
     required String label,
     required String value,
-    required IconData icon,
+    required List<List<dynamic>> icon,
     double indent = 0,
   }) {
     final palette = context.palette;
@@ -356,7 +358,7 @@ class _FolderPickerDialogState extends State<_FolderPickerDialog> {
     return ListTile(
       dense: true,
       contentPadding: EdgeInsets.only(left: 12 + indent, right: 8),
-      leading: Icon(icon,
+      leading: HugeIcon(icon: icon,
           color: active ? AppColors.primary : palette.mutedForeground),
       title: Text(
         label,
@@ -366,7 +368,7 @@ class _FolderPickerDialogState extends State<_FolderPickerDialog> {
             weight: active ? FontWeight.w700 : FontWeight.w500),
       ),
       trailing: active
-          ? Icon(Icons.check_circle_rounded, color: AppColors.primary, size: 20)
+          ? HugeIcon(icon: HugeIcons.strokeRoundedCheckmarkCircle02, color: AppColors.primary, size: 20)
           : null,
       onTap: () => setState(() => _selected = value),
     );

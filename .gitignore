@@ -8,6 +8,9 @@ build/
 coverage/
 android/.gradle/
 android/local.properties
+android/key.properties
+*.jks
+*.keystore
 backend/.venv/
 backend/__pycache__/
 backend/.env

@@ -1,3 +1,4 @@
+import 'package:hugeicons/hugeicons.dart';
 import 'dart:async';
 import 'dart:collection';
 import 'dart:io';
@@ -315,6 +316,7 @@ class _MediaThumbnailState extends State<MediaThumbnail> {
           filterQuality: FilterQuality.medium,
           headers: widget.headers,
           fit: BoxFit.cover,
+          gaplessPlayback: true,
           errorBuilder: (_, __, ___) => _placeholder(context, video: false),
         ));
       }
@@ -330,6 +332,7 @@ class _MediaThumbnailState extends State<MediaThumbnail> {
             filterQuality: FilterQuality.medium,
             headers: widget.headers,
             fit: BoxFit.cover,
+            gaplessPlayback: true,
             errorBuilder: (_, __, ___) => _placeholder(context, video: true),
           ),
           video: true,
@@ -380,12 +383,8 @@ class _MediaThumbnailState extends State<MediaThumbnail> {
                 image,
                 if (video)
                   const Center(
-                    child: Icon(Icons.play_circle_fill,
-                        color: Colors.white,
-                        size: 25,
-                        shadows: [
-                          Shadow(blurRadius: 4, color: Colors.black87)
-                        ]),
+                    child: HugeIcon(icon: HugeIcons.strokeRoundedPlayCircle02,
+                        color: Colors.white, size: 25),
                   ),
               ],
             ),
@@ -395,7 +394,7 @@ class _MediaThumbnailState extends State<MediaThumbnail> {
 
   Widget _placeholder(BuildContext context, {required bool video}) => Container(
         color: Theme.of(context).colorScheme.surfaceContainerHighest,
-        child: Icon(video ? Icons.movie_outlined : Icons.image_outlined,
+        child: HugeIcon(icon: video ? HugeIcons.strokeRoundedFilm01 : HugeIcons.strokeRoundedImage01,
             color: Theme.of(context).colorScheme.onSurfaceVariant),
       );
 }

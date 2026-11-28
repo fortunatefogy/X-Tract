@@ -18,6 +18,7 @@ class MediaProbe {
 
 class MediaExtractor {
   static const _maxPageBytes = 2 * 1024 * 1024;
+  static const _maxProbeCache = 512;
 
   static bool skipHtmlFallback(String url) {
     final uri = Uri.tryParse(url);
@@ -39,6 +40,94 @@ class MediaExtractor {
 
   static final _probeSkip =
       RegExp(r'\.(js|css|m4s|ts)$|^blob:', caseSensitive: false);
+  static final _tagPattern = RegExp(
+    r'<(img|video|audio|source|track|meta|link|a)\b[^>]*>',
+    caseSensitive: false,
+  );
+  static final _attrPattern = RegExp(
+    r'''([\w:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))''',
+    caseSensitive: false,
+  );
+  static final _linkRelPattern = RegExp(
+    r'image_src|icon|apple-touch-icon|preload',
+    caseSensitive: false,
+  );
+  static final _iconLinkPattern = RegExp(
+    r'image_src|icon|apple-touch-icon',
+    caseSensitive: false,
+  );
+  static final _stylePattern = RegExp(
+    r'''style\s*=\s*(?:"([^"]*)"|'([^']*)')''',
+    caseSensitive: false,
+  );
+  static final _cssUrlPattern = RegExp(
+    r'''url\(["']?([^"')]+)["']?\)''',
+    caseSensitive: false,
+  );
+  static final _jsonLdPattern = RegExp(
+    r'''<script[^>]+type\s*=\s*["']application/ld\+json["'][^>]*>(.*?)</script>''',
+    caseSensitive: false,
+    dotAll: true,
+  );
+  static final _wwwPrefix = RegExp(r'^www\.');
+  static final _youtubePath = RegExp(r'^/watch\?|^/embed/|^/v/');
+  static final _vimeoPath = RegExp(r'^/\d+|^/video/');
+  static final _dailymotionPath = RegExp(r'^/video/|^/embed/');
+  static final _twitchPath = RegExp(r'^/videos/|^/clip/');
+  static final _tiktokPath = RegExp(r'^/@[\w.-]+/video/');
+  static final _socialVideoPath =
+      RegExp(r'/watch/|/videos/|/reel/|/tv/|/status/');
+  static final _spotifyPath = RegExp(r'/track/|/episode/|/album/');
+  static final _googleDocsPath =
+      RegExp(r'^/document/|^/spreadsheets/|^/presentation/|^/viewer');
+  static final _googleDrivePath = RegExp(r'^/file/|^/viewer');
+  static final _dropboxPath = RegExp(r'^/s/');
+  static final _scribdPath = RegExp(r'^/document/|^/doc/');
+  static final _boxPath = RegExp(r'^/s/|^/file/');
+  static final _sharepointPath = RegExp(r'^/_layouts/|^/Documents/');
+  static final _imageExtPattern = RegExp(
+    r'\.(jpe?g|png|gif|webp|avif|bmp|svg|tiff?|ico|jfif|jxl|heic|heif|apng|jp2|j2k|jpf|jpx|jpm|mj2|pcx|tga|wbmp|xbm|dib|emf|wmf|ras|icns|cur|fpx|bpg|qoi|hdr|exr|pbm|pgm|ppm|pam|dng|psd)$',
+  );
+  static final _videoExtPattern = RegExp(
+    r'\.(mp4|webm|mov|m4v|m3u8|mpd|3gp|3g2|ts|m4s|ism|isml|flv|mkv|avi|ogv|ogm|asf|wmv|mpg|mpeg|m2v|m2ts|mts|vob|mxf|f4v|f4p|rm|rmvb|dv|nut|mjpeg|3gpp|3gp2|wtv|dvr-ms|gxf|lxf|pva|roq|smk|bik|viv|yuv|y4m|h264|h265|hevc|vc1|mpegts)$',
+  );
+  static final _audioExtPattern = RegExp(
+    r'\.(mp3|m4a|aac|ogg|oga|opus|wav|flac|weba|amr|ac3|eac3|caf|aiff?|wma|mka|m4b|m4p|mid|midi|f4a|f4b|aifc|au|snd|ra|ram|rmi|mpc|ape|tak|tta|wv|spx|voc|8svx|pls|asx)$',
+  );
+  static final _documentExtPattern = RegExp(
+    r'\.(pdf|docx?|xlsx?|pptx?|txt|rtf|odt|ods|odp|csv|epub|mobi)$',
+  );
+  static final _subtitleExtPattern = RegExp(r'\.(vtt|srt|ttml|ass|ssa)$');
+  static final _playlistPath = RegExp(
+    r'\.(m3u8|m3u|mpd|pls|asx)$',
+    caseSensitive: false,
+  );
+  static final _hlsPath = RegExp(r'\.(m3u8|m3u)$', caseSensitive: false);
+  static final _dashPath = RegExp(r'\.mpd$', caseSensitive: false);
+  static const Set<String> _socialVideoHosts = {
+    'facebook.com',
+    'instagram.com',
+    'twitter.com',
+    'x.com',
+  };
+  static const Set<String> _audioHosts = {
+    'spotify.com',
+    'open.spotify.com',
+    'soundcloud.com',
+    'mixcloud.com',
+    'audiomack.com',
+    'podcasts.apple.com',
+    'anchor.fm',
+  };
+  static const Set<String> _documentHosts = {
+    'docs.google.com',
+    'drive.google.com',
+    'dropbox.com',
+    'scribd.com',
+    'slideshare.net',
+    'issuu.com',
+    'box.com',
+  };
 
   final Map<String, (MediaProbe, DateTime)> _probeCache = {};
 
@@ -69,6 +158,13 @@ class MediaExtractor {
       var result = await _probeWithHead(client, uri, headers);
       result ??= await _probeWithGet(client, uri, headers);
       _probeCache[url] = (result, DateTime.now());
+      if (_probeCache.length > _maxProbeCache) {
+        final cutoff = DateTime.now().subtract(const Duration(minutes: 5));
+        _probeCache.removeWhere((_, entry) => entry.$2.isBefore(cutoff));
+        if (_probeCache.length > _maxProbeCache) {
+          _probeCache.remove(_probeCache.keys.first);
+        }
+      }
       return result;
     } catch (_) {
       return const MediaProbe('', null);
@@ -329,59 +425,41 @@ class MediaExtractor {
   }
 
   String? _platformType(Uri uri) {
-    final host = uri.host.toLowerCase().replaceFirst(RegExp(r'^www\.'), '');
+    final host = uri.host.toLowerCase().replaceFirst(_wwwPrefix, '');
     final path = '${uri.path}${uri.hasQuery ? '?${uri.query}' : ''}';
-    if (host == 'youtube.com' &&
-            RegExp(r'^/watch\?|^/embed/|^/v/').hasMatch(path) ||
+    if (host == 'youtube.com' && _youtubePath.hasMatch(path) ||
         host == 'youtu.be') return 'video';
-    if (host == 'vimeo.com' && RegExp(r'^/\d+|^/video/').hasMatch(path) ||
+    if (host == 'vimeo.com' && _vimeoPath.hasMatch(path) ||
         host == 'player.vimeo.com') return 'video';
-    if (host == 'dailymotion.com' &&
-        RegExp(r'^/video/|^/embed/').hasMatch(path)) return 'video';
-    if ((host == 'twitch.tv' && RegExp(r'^/videos/|^/clip/').hasMatch(path)) ||
+    if (host == 'dailymotion.com' && _dailymotionPath.hasMatch(path)) {
+      return 'video';
+    }
+    if ((host == 'twitch.tv' && _twitchPath.hasMatch(path)) ||
         host == 'clips.twitch.tv') return 'video';
-    if (host == 'tiktok.com' && RegExp(r'^/@[\w.-]+/video/').hasMatch(path))
+    if (host == 'tiktok.com' && _tiktokPath.hasMatch(path)) return 'video';
+    if (_socialVideoHosts.contains(host) && _socialVideoPath.hasMatch(path)) {
       return 'video';
-    if (['facebook.com', 'instagram.com', 'twitter.com', 'x.com']
-            .contains(host) &&
-        RegExp(r'/watch/|/videos/|/reel/|/tv/|/status/').hasMatch(path))
-      return 'video';
-    if ([
-          'spotify.com',
-          'open.spotify.com',
-          'soundcloud.com',
-          'mixcloud.com',
-          'audiomack.com',
-          'podcasts.apple.com',
-          'anchor.fm'
-        ].contains(host) &&
-        (host != 'spotify.com' ||
-            RegExp(r'/track/|/episode/|/album/').hasMatch(path)))
+    }
+    if (_audioHosts.contains(host) &&
+        (host != 'spotify.com' || _spotifyPath.hasMatch(path))) {
       return 'audio';
+    }
     if ((host == 'bandcamp.com' || host.endsWith('.bandcamp.com')) &&
         host != 'bandcamp.com') return 'audio';
-    if (host == 'docs.google.com' &&
-        !RegExp(r'^/document/|^/spreadsheets/|^/presentation/|^/viewer')
-            .hasMatch(path)) return null;
-    if (host == 'drive.google.com' &&
-        !RegExp(r'^/file/|^/viewer').hasMatch(path)) return null;
-    if (host == 'dropbox.com' && !RegExp(r'^/s/').hasMatch(path)) return null;
-    if (host == 'scribd.com' && !RegExp(r'^/document/|^/doc/').hasMatch(path))
+    if (host == 'docs.google.com' && !_googleDocsPath.hasMatch(path)) {
       return null;
-    if (host == 'box.com' && !RegExp(r'^/s/|^/file/').hasMatch(path))
+    }
+    if (host == 'drive.google.com' && !_googleDrivePath.hasMatch(path)) {
       return null;
+    }
+    if (host == 'dropbox.com' && !_dropboxPath.hasMatch(path)) return null;
+    if (host == 'scribd.com' && !_scribdPath.hasMatch(path)) return null;
+    if (host == 'box.com' && !_boxPath.hasMatch(path)) return null;
     if (host.endsWith('.sharepoint.com') &&
-        !RegExp(r'^/_layouts/|^/Documents/').hasMatch(path)) return null;
-    if ([
-          'docs.google.com',
-          'drive.google.com',
-          'dropbox.com',
-          'scribd.com',
-          'slideshare.net',
-          'issuu.com',
-          'box.com'
-        ].contains(host) ||
-        host.endsWith('.sharepoint.com')) return 'document';
+        !_sharepointPath.hasMatch(path)) return null;
+    if (_documentHosts.contains(host) || host.endsWith('.sharepoint.com')) {
+      return 'document';
+    }
     return null;
   }
 
@@ -439,19 +517,11 @@ class MediaExtractor {
 
   List<MediaItem> _parseHtml(String html, Uri pageUri, String sourcePage) {
     final items = <String, MediaItem>{};
-    final tagPattern = RegExp(
-      r'<(img|video|audio|source|track|meta|link|a)\b[^>]*>',
-      caseSensitive: false,
-    );
-    final attrPattern = RegExp(
-      r'''([\w:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))''',
-      caseSensitive: false,
-    );
 
-    for (final tagMatch in tagPattern.allMatches(html)) {
+    for (final tagMatch in _tagPattern.allMatches(html)) {
       final tag = tagMatch.group(1)!.toLowerCase();
       final attributes = <String, String>{};
-      for (final match in attrPattern.allMatches(tagMatch.group(0)!)) {
+      for (final match in _attrPattern.allMatches(tagMatch.group(0)!)) {
         final value = match.group(2) ?? match.group(3) ?? match.group(4) ?? '';
         attributes[match.group(1)!.toLowerCase()] =
             _decodeEntities(value.trim());
@@ -526,15 +596,12 @@ class MediaExtractor {
           if (kind != null) candidates.add((value, kind));
         }
       } else if (tag == 'link' &&
-          RegExp(r'image_src|icon|apple-touch-icon|preload',
-                  caseSensitive: false)
-              .hasMatch(attributes['rel'] ?? '')) {
+          _linkRelPattern.hasMatch(attributes['rel'] ?? '')) {
         if (attributes['href'] case final value?) {
           final kind = _typeFromMime(attributes['type'] ?? '') ??
               _typeFromPath(Uri.tryParse(value) ?? Uri());
           final isIconLink =
-              RegExp(r'image_src|icon|apple-touch-icon', caseSensitive: false)
-                  .hasMatch(attributes['rel'] ?? '');
+              _iconLinkPattern.hasMatch(attributes['rel'] ?? '');
           final preloadAs = (attributes['as'] ?? '').toLowerCase();
           final hintedKind = kind ??
               (isIconLink
@@ -577,22 +644,15 @@ class MediaExtractor {
       }
     }
 
-    final stylePattern = RegExp(r'''style\s*=\s*(?:"([^"]*)"|'([^']*)')''',
-        caseSensitive: false);
-    for (final styleMatch in stylePattern.allMatches(html)) {
+    for (final styleMatch in _stylePattern.allMatches(html)) {
       final style = styleMatch.group(1) ?? styleMatch.group(2) ?? '';
-      for (final background
-          in RegExp(r'''url\(["']?([^"')]+)["']?\)''', caseSensitive: false)
-              .allMatches(style)) {
+      for (final background in _cssUrlPattern.allMatches(style)) {
         _addHtmlCandidate(items, pageUri, background.group(1)!, 'image',
             sourcePage, 'css-background');
       }
     }
 
-    final jsonLdPattern = RegExp(
-        r'''<script[^>]+type\s*=\s*["']application/ld\+json["'][^>]*>(.*?)</script>''',
-        caseSensitive: false, dotAll: true);
-    for (final match in jsonLdPattern.allMatches(html)) {
+    for (final match in _jsonLdPattern.allMatches(html)) {
       try {
         void inspect(Object? value) {
           if (value is List) {
@@ -663,34 +723,23 @@ class MediaExtractor {
       }
       path = '.$extension';
     }
-    if (RegExp(
-            r'\.(jpe?g|png|gif|webp|avif|bmp|svg|tiff?|ico|jfif|jxl|heic|heif|apng|jp2|j2k|jpf|jpx|jpm|mj2|pcx|tga|wbmp|xbm|dib|emf|wmf|ras|icns|cur|fpx|bpg|qoi|hdr|exr|pbm|pgm|ppm|pam|dng|psd)$')
-        .hasMatch(path)) {
+    if (_imageExtPattern.hasMatch(path)) {
       return 'image';
     }
-    if (RegExp(
-            r'\.(mp4|webm|mov|m4v|m3u8|mpd|3gp|3g2|ts|m4s|ism|isml|flv|mkv|avi|ogv|ogm|asf|wmv|mpg|mpeg|m2v|m2ts|mts|vob|mxf|f4v|f4p|rm|rmvb|dv|nut|mjpeg|3gpp|3gp2|wtv|dvr-ms|gxf|lxf|pva|roq|smk|bik|viv|yuv|y4m|h264|h265|hevc|vc1|mpegts)$')
-        .hasMatch(path)) {
+    if (_videoExtPattern.hasMatch(path)) {
       return 'video';
     }
-    if (RegExp(
-            r'\.(mp3|m4a|aac|ogg|oga|opus|wav|flac|weba|amr|ac3|eac3|caf|aiff?|wma|mka|m4b|m4p|mid|midi|f4a|f4b|aifc|au|snd|ra|ram|rmi|mpc|ape|tak|tta|wv|spx|voc|8svx|pls|asx)$')
-        .hasMatch(path)) return 'audio';
-    if (RegExp(r'\.(pdf|docx?|xlsx?|pptx?|txt|rtf|odt|ods|odp|csv|epub|mobi)$')
-        .hasMatch(path)) return 'document';
-    if (RegExp(r'\.(vtt|srt|ttml|ass|ssa)$').hasMatch(path)) return 'subtitle';
+    if (_audioExtPattern.hasMatch(path)) return 'audio';
+    if (_documentExtPattern.hasMatch(path)) return 'document';
+    if (_subtitleExtPattern.hasMatch(path)) return 'subtitle';
     return null;
   }
 
-  bool _isPlaylist(Uri uri) =>
-      RegExp(r'\.(m3u8|m3u|mpd|pls|asx)$', caseSensitive: false)
-          .hasMatch(uri.path);
+  bool _isPlaylist(Uri uri) => _playlistPath.hasMatch(uri.path);
 
-  bool _isHls(Uri uri) =>
-      RegExp(r'\.(m3u8|m3u)$', caseSensitive: false).hasMatch(uri.path);
+  bool _isHls(Uri uri) => _hlsPath.hasMatch(uri.path);
 
-  bool _isDash(Uri uri) =>
-      RegExp(r'\.mpd$', caseSensitive: false).hasMatch(uri.path);
+  bool _isDash(Uri uri) => _dashPath.hasMatch(uri.path);
 
   String? _typeFromMime(String mime) {
     final normalized = mime.toLowerCase();
